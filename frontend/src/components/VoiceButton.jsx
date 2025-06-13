@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { FaMicrophone } from 'react-icons/fa';
 
-export default function VoiceButton({ onPaymentLink }) {
+export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -33,8 +33,7 @@ export default function VoiceButton({ onPaymentLink }) {
 
     const durationMs = Date.now() - startTimeRef.current;
     if (durationMs < 400) {
-      // Too short – discard to avoid Whisper 0.1s error
-      mediaRecorderRef.current.stop(); // still stop to release stream
+      mediaRecorderRef.current.stop();
       alert('Hold the button a bit longer to record');
       setIsRecording(false);
       return;
@@ -45,41 +44,47 @@ export default function VoiceButton({ onPaymentLink }) {
 
     mediaRecorderRef.current.onstop = async () => {
       const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-      // Build FormData for voice-to-text
-      const formData = new FormData();
-      formData.append('audio', blob, 'audio.webm');
-
-      try {
-        const vtRes = await fetch('http://localhost:4000/api/voice-to-text', {
-          method: 'POST',
-          body: formData,
-        });
-        const vtData = await vtRes.json();
-        if (!vtRes.ok) {
-          console.error(vtData);
-          alert(vtData.error || 'Transcription failed');
-          return;
+      if (mode === 'command') {
+        // original flow
+        const formData = new FormData();
+        formData.append('audio', blob, 'audio.webm');
+        try {
+          const vtRes = await fetch('http://localhost:4000/api/voice-to-text', {
+            method: 'POST',
+            body: formData,
+          });
+          const vtData = await vtRes.json();
+          if (!vtRes.ok) {
+            alert(vtData.error || 'Could not process command');
+            return;
+          }
+          // Hand over to confirmation dialog via callback
+          onPaymentLink?.(null, vtData); // second arg carries transcript data
+        } catch (err) {
+          alert('Error contacting backend');
         }
-
-        const { amountCents, transcript } = vtData;
-        console.log('Transcript:', transcript, 'Amount cents:', amountCents);
-
-        // Now create payment link
-        const payRes = await fetch('http://localhost:4000/api/create-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amountCents }),
-        });
-        const payData = await payRes.json();
-        if (payData.url) {
-          onPaymentLink?.(payData.url);
-        } else {
-          alert('Payment link not generated');
+      } else if (mode === 'answer') {
+        const formData = new FormData();
+        formData.append('audio', blob, 'audio.webm');
+        formData.append('amountCents', answerPayload.amountCents);
+        formData.append('email', answerPayload.email);
+        try {
+          const res = await fetch('http://localhost:4000/api/voice-confirm', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await res.json();
+          if (data.url) {
+            onPaymentLink?.(data.url);
+          } else if (data.cancelled) {
+            alert('Payment cancelled');
+            onCancel?.();
+          } else if (data.retry) {
+            alert('I did not catch that, please try again');
+          }
+        } catch (err) {
+          alert('Error contacting backend');
         }
-      } catch (error) {
-        console.error(error);
-        alert('Error contacting backend');
       }
     };
   }

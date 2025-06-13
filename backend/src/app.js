@@ -15,8 +15,12 @@ app.use(express.json());
 // Routes
 import voiceRouter from './routes/voiceToText.js';
 import paymentRouter from './routes/createPayment.js';
+import ttsRouter from './routes/ttsConfirm.js';
+import voiceConfirmRouter from './routes/voiceConfirm.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
+app.use('/api', ttsRouter);
+app.use('/api', voiceConfirmRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });

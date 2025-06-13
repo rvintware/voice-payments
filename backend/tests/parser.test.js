@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractAmountCents, wordsToNumber } from '../src/utils/parser.js';
+import { extractAmountCents, wordsToNumber, extractName, parseYesNo } from '../src/utils/parser.js';
 
 describe('parser utils', () => {
   it('converts number words to integer', () => {
@@ -15,5 +15,15 @@ describe('parser utils', () => {
 
   it('extracts word amounts', () => {
     expect(extractAmountCents('send twenty dollars')).toBe(2000);
+  });
+
+  it('extracts name after "to"', () => {
+    expect(extractName('send 20 to Teja')).toBe('teja');
+  });
+
+  it('parses yes/no from transcript', () => {
+    expect(parseYesNo('Yes, please')).toBe('yes');
+    expect(parseYesNo('No thanks')).toBe('no');
+    expect(parseYesNo('maybe')).toBe(null);
   });
 }); 
