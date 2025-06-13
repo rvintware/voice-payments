@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 export default function useBalance() {
-  const [bal, setBal] = useState({ available: null, pending: null });
+  const [amountCents, setAmount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -11,7 +11,7 @@ export default function useBalance() {
       const res = await fetch('http://localhost:4000/api/balance');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      setBal({ available: data.availableCents, pending: data.pendingCents });
+      setAmount(data.amountCents);
     } catch (err) {
       setError(err);
     } finally {
@@ -25,5 +25,5 @@ export default function useBalance() {
     return () => clearInterval(id);
   }, []);
 
-  return { ...bal, loading, error };
+  return { amountCents, loading, error };
 } 
