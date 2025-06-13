@@ -11,6 +11,7 @@ export default {
         'banking-purple': '#6B46C1',
         'banking-mint': '#10B981',
         'banking-gray': '#27272A',
+        'rh-green': '#00C805',
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

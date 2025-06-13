@@ -17,16 +17,22 @@ import voiceRouter from './routes/voiceToText.js';
 import paymentRouter from './routes/createPayment.js';
 import ttsRouter from './routes/ttsConfirm.js';
 import voiceConfirmRouter from './routes/voiceConfirm.js';
+import balanceRouter from './routes/balance.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
 app.use('/api', ttsRouter);
 app.use('/api', voiceConfirmRouter);
+app.use('/api', balanceRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });
 });
 
-app.listen(PORT, () => {
-  /* eslint-disable no-console */
-  console.log(`Server listening at http://localhost:${PORT}`);
-});
+export default app;
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    /* eslint-disable no-console */
+    console.log(`Server listening at http://localhost:${PORT}`);
+  });
+}
