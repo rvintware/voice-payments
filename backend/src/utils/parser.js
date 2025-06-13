@@ -36,4 +36,17 @@ export function extractAmountCents(transcript) {
   const wordAmount = wordsToNumber(transcript);
   if (wordAmount) return wordAmount * 100;
   return null;
+}
+
+export function extractName(transcript) {
+  const match = transcript.toLowerCase().match(/\bto\s+(\w+)/);
+  if (match) return match[1];
+  return null;
+}
+
+export function parseYesNo(transcript) {
+  const text = transcript.trim().toLowerCase();
+  if (/^(yes|yeah|yep|sure|affirmative)\b/.test(text)) return 'yes';
+  if (/^(no|nope|nah|negative)\b/.test(text)) return 'no';
+  return null;
 } 

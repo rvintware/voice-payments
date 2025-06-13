@@ -54,3 +54,25 @@ Happy hacking!
 ## Tips
 • Hold the mic for at least half a second so the audio isn't rejected for being too short.
 • Say the amount in digits ("20 dollars") or clear words ("twenty dollars").
+
+## Voice confirmation flow (Iteration 2)
+1. Hold mic and say e.g. "Send twenty dollars to Teja".
+2. Backend transcribes, extracts amount + recipient, returns JSON.
+3. UI shows modal + plays OpenAI Alloy TTS: "Send twenty dollars to Teja. Should I proceed?".
+4. Hold mic again, say "yes" or "no".
+   * yes → Stripe Checkout session is created, link card appears.
+   * no  → flow cancels.
+
+Routes:
+* `POST /api/voice-to-text` – multipart audio → `{ amountCents, name, email }`.
+* `POST /api/tts/confirm` – `{ amountCents, name }` → MP3 stream.
+* `POST /api/voice-confirm` – multipart audio + fields → `{ url } | { cancelled } | { retry }`.
+
+## Running all tests
+```
+# backend
+cd backend && npm test
+# frontend
+cd ../frontend && npm test
+```
+The GitHub Action `CI` runs these same commands on every PR.
