@@ -7,8 +7,13 @@ const router = Router();
 router.get('/balance', async (_req, res) => {
   try {
     const bal = await stripe.balance.retrieve();
-    const available = bal.available[0]?.amount ?? 0;
-    res.json({ amountCents: available });
+    const sum = (arr) =>
+      arr.filter((b) => b.currency === 'cad').reduce((s, b) => s + b.amount, 0);
+
+    const availableCents = sum(bal.available);
+    const pendingCents = sum(bal.pending);
+
+    res.json({ availableCents, pendingCents });
   } catch (err) {
     console.error('Balance error', err);
     res.status(500).json({ error: 'Failed to fetch balance' });
