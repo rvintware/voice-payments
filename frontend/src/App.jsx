@@ -6,10 +6,10 @@ import BalanceBar from './components/BalanceBar.jsx';
 
 export default function App() {
   const [paymentLink, setPaymentLink] = useState(null);
-  const [commandData, setCommandData] = useState(null); // {amountCents,name,email}
+  const [commandData, setCommandData] = useState(null); // {amountCents,recipientEmail}
 
   function handleCommand(_, data) {
-    // data contains amountCents,name,email from voice-to-text
+    // data contains amountCents,recipientEmail from interpreter
     if (data) setCommandData(data);
   }
 
@@ -28,8 +28,7 @@ export default function App() {
       {commandData && !paymentLink && (
         <ConfirmationDialog
           amountCents={commandData.amountCents}
-          name={commandData.name}
-          email={commandData.email}
+          recipientEmail={commandData.recipientEmail}
           onPaymentLink={(url) => setPaymentLink(url)}
           onCancel={reset}
         />

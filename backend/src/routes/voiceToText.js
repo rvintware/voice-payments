@@ -4,8 +4,6 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { extractAmountCents, extractName } from '../utils/parser.js';
-import CONTACTS from '../data/contacts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,17 +31,7 @@ router.post('/voice-to-text', upload.single('audio'), async (req, res) => {
     fs.unlinkSync(tempPath); // clean up
 
     const transcript = transcription.text;
-    const amountCents = extractAmountCents(transcript);
-    if (!amountCents) {
-      return res.status(422).json({ error: 'amount_not_found', transcript });
-    }
-    const nameKey = extractName(transcript);
-    const contact = nameKey ? CONTACTS[nameKey] : null;
-    if (!contact) {
-      return res.status(422).json({ error: 'contact_not_found', transcript });
-    }
-
-    res.json({ transcript, amountCents, name: contact.display, email: contact.email });
+    res.json({ transcript });
   } catch (err) {
     console.error('Whisper error', err);
     res.status(500).json({ error: 'Failed to transcribe audio' });

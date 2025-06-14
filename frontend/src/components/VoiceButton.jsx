@@ -58,8 +58,21 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             alert(vtData.error || 'Could not process command');
             return;
           }
+          // Send transcript to interpret endpoint
+          const interpRes = await fetch('http://localhost:4000/api/interpret', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: vtData.transcript }),
+          });
+          const interpData = await interpRes.json();
+
+          if (!interpRes.ok) {
+            alert(interpData.error || 'Could not understand command');
+            return;
+          }
+
           // Hand over to confirmation dialog via callback
-          onPaymentLink?.(null, vtData); // second arg carries transcript data
+          onPaymentLink?.(null, { ...interpData, transcript: vtData.transcript });
         } catch (err) {
           alert('Error contacting backend');
         }
@@ -67,7 +80,7 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
         const formData = new FormData();
         formData.append('audio', blob, 'audio.webm');
         formData.append('amountCents', answerPayload.amountCents);
-        formData.append('email', answerPayload.email);
+        formData.append('recipientEmail', answerPayload.recipientEmail);
         try {
           const res = await fetch('http://localhost:4000/api/voice-confirm', {
             method: 'POST',
