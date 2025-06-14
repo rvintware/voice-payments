@@ -37,9 +37,9 @@ router.post('/voice-confirm', upload.single('audio'), async (req, res) => {
 
     // yes path – delegate to existing createPayment router logic
     // assume body carries amountCents and email from query params
-    const { amountCents, email } = req.body || {};
-    if (!amountCents || !email) {
-      return res.status(400).json({ error: 'amountCents and email required' });
+    const { amountCents, recipientEmail } = req.body || {};
+    if (!amountCents || !recipientEmail) {
+      return res.status(400).json({ error: 'amountCents and recipientEmail required' });
     }
 
     // Use stripe instance directly (import stripe from createPayment?)
@@ -47,12 +47,12 @@ router.post('/voice-confirm', upload.single('audio'), async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      customer_email: email,
+      customer_email: recipientEmail,
       line_items: [
         {
           price_data: {
-            currency: 'usd',
-            product_data: { name: `Payment to ${email}` },
+            currency: 'cad',
+            product_data: { name: `Payment to ${recipientEmail}` },
             unit_amount: Number(amountCents),
           },
           quantity: 1,

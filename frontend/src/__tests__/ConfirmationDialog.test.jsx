@@ -14,13 +14,12 @@ describe('ConfirmationDialog', () => {
     render(
       <ConfirmationDialog
         amountCents={2000}
-        name="Teja"
-        email="teja@gmail.com"
+        recipientEmail="teja@gmail.com"
         onPaymentLink={() => {}}
         onCancel={() => {}}
       />
     );
-    expect(screen.getByText(/Send \$20.00 to Teja/)).toBeInTheDocument();
+    expect(screen.getByText(/Send \$20.00 to teja/)).toBeInTheDocument();
     expect(screen.getByRole('button')).toBeInTheDocument();
   });
 }); 

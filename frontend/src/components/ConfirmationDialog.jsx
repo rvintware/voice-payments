@@ -2,11 +2,11 @@ import React from 'react';
 import useTTS from '../hooks/useTTS.js';
 import VoiceButton from './VoiceButton.jsx';
 
-export default function ConfirmationDialog({ amountCents, name, email, onPaymentLink, onCancel }) {
+export default function ConfirmationDialog({ amountCents, recipientEmail, onPaymentLink, onCancel }) {
+  if (!amountCents || !recipientEmail) return null;
+  const name = recipientEmail.split('@')[0];
   const dollars = (amountCents / 100).toFixed(2);
   const { loading } = useTTS({ amountCents, name });
-
-  if (!amountCents || !name) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -19,7 +19,7 @@ export default function ConfirmationDialog({ amountCents, name, email, onPayment
         ) : (
           <VoiceButton
             mode="answer"
-            answerPayload={{ amountCents, email }}
+            answerPayload={{ amountCents, recipientEmail }}
             onPaymentLink={onPaymentLink}
             onCancel={onCancel}
           />

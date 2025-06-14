@@ -18,11 +18,13 @@ import paymentRouter from './routes/createPayment.js';
 import ttsRouter from './routes/ttsConfirm.js';
 import voiceConfirmRouter from './routes/voiceConfirm.js';
 import balanceRouter from './routes/balance.js';
+import interpretRouter from './routes/interpret.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
 app.use('/api', ttsRouter);
 app.use('/api', voiceConfirmRouter);
 app.use('/api', balanceRouter);
+app.use('/api', interpretRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });

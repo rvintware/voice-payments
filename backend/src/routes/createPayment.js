@@ -10,29 +10,24 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 const router = Router();
 
-// Hard-coded preset for PoC
-const PRESET = {
-  recipient: 'rehvishwanath@gmail.com',
-  amount: 2000, // in cents = $20.00
-  currency: 'usd',
-};
-
 router.post('/create-payment', async (req, res) => {
   try {
-    const { amountCents } = req.body || {};
+    const { amountCents, recipientEmail } = req.body || {};
 
     if (!amountCents || Number.isNaN(Number(amountCents))) {
       return res.status(400).json({ error: 'amountCents required' });
     }
+    const email = recipientEmail || 'unknown@gmail.com';
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      customer_email: email,
       line_items: [
         {
           price_data: {
-            currency: PRESET.currency,
+            currency: 'cad',
             product_data: {
-              name: `Payment to ${PRESET.recipient}`,
+              name: `Payment to ${email}`,
             },
             unit_amount: Number(amountCents),
           },
@@ -42,7 +37,7 @@ router.post('/create-payment', async (req, res) => {
       success_url: 'https://example.com/success',
       cancel_url: 'https://example.com/cancel',
       metadata: {
-        recipient: PRESET.recipient,
+        recipient: email,
       },
     });
 
