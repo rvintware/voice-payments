@@ -145,13 +145,42 @@ flowchart LR
 
 ---
 
+## Voice Balance Query (Iteration 3)
+
+Ask out loud – *"What's my pending balance?"* – and Alloy replies in ~1.5 s.
+
+1. **Intent detection** – Whisper → `/api/interpret` returns
+   `query_balance({ type: 'pending' | 'available' | 'both' })` via GPT
+   function-calling.
+2. **Data source** – Front-end polls `/api/balance` every 30 s and caches
+   `{ availableCents, pendingCents }` in a global `BalanceContext`.
+3. **Speech synthesis** – New endpoint **`POST /api/tts/say`** streams
+   Alloy TTS for arbitrary text.
+4. **Typical phrasings handled**  
+   • "Pending funds?"  
+   • "Do I have money waiting to clear?"  
+   • "How much is available right now?"  
+   • "Total balance please."
+5. **Trade-offs** – We kept the single Whisper → GPT path for accuracy
+   and predictable latency; browser Web-Speech was rejected for
+   inconsistent quality.
+6. **Tech diff** – Added `/api/tts/say`, `BalanceContext`, and a new
+   branch in `VoiceButton` that detects `intent:'query_balance'` and
+   speaks *"Your pending balance is 84 Canadian dollars."*
+
+Business value: zero extra Stripe calls (uses cached ledger) and a
+compelling "personal banker" moment for demos.
+
+---
+
 ## REST API Reference
 
 | Method | Path | Body | Success Response |
 |--------|------|------|------------------|
 | POST | `/api/voice-to-text` | `FormData { audio: WebM }` | `{ transcript }` |
-| POST | `/api/interpret` | `{ transcript }` | `{ amountCents, recipientEmail }` |
+| POST | `/api/interpret` | `{ transcript }` | `{ amountCents, recipientEmail } \| { intent:'query_balance', type }` |
 | POST | `/api/tts/confirm` | `{ amountCents, name? }` | `audio/mpeg` stream |
+| POST | `/api/tts/say` | `{ text }` | `audio/mpeg` stream |
 | POST | `/api/voice-confirm` | `FormData { audio, amountCents, recipientEmail }` | `{ url } \| { cancelled } \| { retry }` |
 | GET  | `/api/balance` | — | `{ availableCents, pendingCents }` |
 
