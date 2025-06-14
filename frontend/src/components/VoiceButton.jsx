@@ -1,7 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { FaMicrophone } from 'react-icons/fa';
+import { useBalance } from '../context/BalanceContext.jsx';
 
 export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
+  const { availableCents, pendingCents } = useBalance();
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -71,8 +73,42 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             return;
           }
 
-          // Hand over to confirmation dialog via callback
-          onPaymentLink?.(null, { ...interpData, transcript: vtData.transcript });
+          // Check for balance intent
+          if (interpData.intent === 'query_balance') {
+            const type = interpData.type;
+            const cents = type === 'pending'
+              ? pendingCents
+              : type === 'available'
+              ? availableCents
+              : (pendingCents ?? 0) + (availableCents ?? 0);
+
+            if (cents == null) {
+              alert('Balance is still loading, please try again');
+              return;
+            }
+
+            const dollars = (cents / 100).toFixed(2);
+            try {
+              const ttsRes = await fetch('http://localhost:4000/api/tts/say', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: `Your ${type} balance is ${dollars} Canadian dollars` }),
+              });
+              const blob = await ttsRes.blob();
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.play();
+              return; // Do not proceed to payment flow
+            } catch (err) {
+              alert('Could not speak balance');
+              return;
+            }
+          }
+
+          // Hand over to confirmation dialog via callback if payment intent
+          if (interpData.amountCents && interpData.recipientEmail) {
+            onPaymentLink?.(null, { ...interpData, transcript: vtData.transcript });
+          }
         } catch (err) {
           alert('Error contacting backend');
         }

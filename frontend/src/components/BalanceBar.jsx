@@ -1,5 +1,5 @@
 import React from 'react';
-import useBalance from '../hooks/useBalance.js';
+import { useBalance } from '../context/BalanceContext.jsx';
 
 export default function BalanceBar() {
   const { availableCents, pendingCents, loading } = useBalance();
