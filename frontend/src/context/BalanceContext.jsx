@@ -8,4 +8,6 @@ export function BalanceProvider({ children }) {
   return <BalanceContext.Provider value={balance}>{children}</BalanceContext.Provider>;
 }
 
-export const useBalance = () => useContext(BalanceContext); 
+export const useBalance = () => useContext(BalanceContext);
+
+export { BalanceContext }; 
