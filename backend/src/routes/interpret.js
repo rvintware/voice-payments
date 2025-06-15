@@ -116,7 +116,20 @@ router.post('/interpret', async (req, res) => {
       if (!['pending', 'available', 'both'].includes(type)) {
         return res.status(422).json({ error: 'parse_incomplete', transcript });
       }
-      return res.json({ intent: 'query_balance', type });
+
+      // Fetch cached balance from dedicated route
+      const balRes = await fetch('http://localhost:4000/api/balance');
+      const balJson = await balRes.json();
+      const cents =
+        type === 'pending'
+          ? balJson.pendingCents
+          : type === 'available'
+          ? balJson.availableCents
+          : balJson.pendingCents + balJson.availableCents;
+
+      const { balanceSentence } = await import('../utils/speechTemplates.js');
+      const sentence = balanceSentence({ type, cents });
+      return res.json({ intent: 'speak', sentence });
     } else if (fnCall.name === 'query_recent_transactions') {
       const args = JSON.parse(fnCall.arguments || '{}');
       const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
