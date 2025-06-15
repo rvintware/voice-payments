@@ -120,7 +120,23 @@ router.post('/interpret', async (req, res) => {
     } else if (fnCall.name === 'query_recent_transactions') {
       const args = JSON.parse(fnCall.arguments || '{}');
       const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
-      return res.json({ intent: 'query_recent_transactions', limit });
+
+      // Fetch the latest rows directly from the REST API
+      const txRes = await fetch(
+        'http://localhost:4000/api/transactions?' +
+          new URLSearchParams({ limit })
+      );
+      if (!txRes.ok) {
+        console.error('Recent tx fetch failed', await txRes.text());
+        return res.status(500).json({ error: 'tx_fetch_failed' });
+      }
+      const { transactions } = await txRes.json();
+
+      // Turn the rows into a human-readable sentence
+      const { formatList } = await import('../utils/formatters.js');
+      const sentence = formatList(transactions);
+
+      return res.json({ intent: 'speak', sentence });
     } else if (fnCall.name === 'query_revenue') {
       const args = JSON.parse(fnCall.arguments || '{}');
       const period = args.period || 'today';
