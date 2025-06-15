@@ -3,6 +3,7 @@ import VoiceButton from './components/VoiceButton.jsx';
 import PaymentResult from './components/PaymentResult.jsx';
 import ConfirmationDialog from './components/ConfirmationDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
+import TransactionsFeed from './components/TransactionsFeed.jsx';
 
 export default function App() {
   const [paymentLink, setPaymentLink] = useState(null);
@@ -34,6 +35,7 @@ export default function App() {
         />
       )}
       <PaymentResult url={paymentLink} />
+      <TransactionsFeed />
     </main>
   );
 }

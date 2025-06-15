@@ -44,6 +44,26 @@ router.post('/interpret', async (req, res) => {
           required: ['type'],
         },
       },
+      {
+        name: 'query_recent_transactions',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 10, default: 5 }
+          },
+          required: []
+        }
+      },
+      {
+        name: 'query_revenue',
+        parameters: {
+          type: 'object',
+          properties: {
+            period: { type: 'string', enum: ['today', 'yesterday', 'week', 'month'], default: 'today' }
+          },
+          required: []
+        }
+      },
     ];
 
     const chat = await openai.chat.completions.create({
@@ -71,6 +91,17 @@ router.post('/interpret', async (req, res) => {
         return res.status(422).json({ error: 'parse_incomplete', transcript });
       }
       return res.json({ intent: 'query_balance', type });
+    } else if (fnCall.name === 'query_recent_transactions') {
+      const args = JSON.parse(fnCall.arguments || '{}');
+      const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
+      return res.json({ intent: 'query_recent_transactions', limit });
+    } else if (fnCall.name === 'query_revenue') {
+      const args = JSON.parse(fnCall.arguments || '{}');
+      const period = args.period || 'today';
+      if (!['today', 'yesterday', 'week', 'month'].includes(period)) {
+        return res.status(422).json({ error: 'parse_incomplete', transcript });
+      }
+      return res.json({ intent: 'query_revenue', period });
     }
 
     return res.status(422).json({ error: 'parse_failed', transcript });
