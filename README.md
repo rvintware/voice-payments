@@ -2,9 +2,9 @@
 
 Money should move at the speed of conversation.  This repo shows how to turn **speech → intent → Stripe** into a fully-featured developer prototype using Whisper, GPT function-calling, Alloy TTS and a local SQLite mirror for lightning-fast queries.
 
-> “Show me my failed charges over fifty dollars.”  
-> “How much revenue did we make today?”  
-> “What's the status of payment intent _pi_3RZiF…_?”
+> "Show me my failed charges over fifty dollars."  
+> "How much revenue did we make today?"  
+> "What's the status of payment intent _pi_3RZiF…_?"
 
 All answered aloud in under a second.
 
@@ -26,18 +26,18 @@ All answered aloud in under a second.
 
 | # | Capability | User speaks… | System does | Tech bits |
 |---|------------|--------------|-------------|-----------|
-| 1 | Natural-language payments | “Send twenty dollars to Teja” | Whisper → GPT → `create_payment` → Stripe Checkout link | `create_payment` tool, `routes/createPayment.js` |
-| 2 | Voice confirmation | “Yes” / “No” answer to Alloy prompt | Modal + Alloy TTS prompt then `/voice-confirm` | `tts/confirm`, `voiceConfirm.js` |
-| 3 | Balance enquiry | “What's my pending balance?” | Uses cached `/api/balance`, speaks amount | `BalanceContext`, generic `/tts/say` |
+| 1 | Natural-language payments | "Send twenty dollars to Teja" | Whisper → GPT → `create_payment` → Stripe Checkout link | `create_payment` tool, `routes/createPayment.js` |
+| 2 | Voice confirmation | "Yes" / "No" answer to Alloy prompt | Modal + Alloy TTS prompt then `/voice-confirm` | `tts/confirm`, `voiceConfirm.js` |
+| 3 | Balance enquiry | "What's my pending balance?" | Uses cached `/api/balance`, speaks amount | `BalanceContext`, generic `/tts/say` |
 | 4 | Timeline feed | — | Infinite scroll of recent payments | `TransactionsContext`, `/api/transactions` |
-| 5 | Free-form search | “List failed charges over fifty dollars” | GPT → `search_transactions` → sentence → speak | `/transactions/search`, dynamic SQL |
-| 6 | Aggregated stats | “How much revenue this month?” | GPT → `aggregate_transactions` → totals → speak | `/transactions/aggregate`, formatter |
-| 7 | Multi-currency awareness | “Show me CAD payments only” | Currency filter in both search & aggregate | `currency` param everywhere |
-| 8 | Amount filters | “over fifty dollars”, “below $5” | `min_amount_cents`, `max_amount_cents` | Same search route |
-| 9 | Date filters | “from last Monday”, “today”, “this week” | Approx date parsing -> period param | Built-in period map |
+| 5 | Free-form search | "List failed charges over fifty dollars" | GPT → `search_transactions` → sentence → speak | `/transactions/search`, dynamic SQL |
+| 6 | Aggregated stats | "How much revenue this month?" | GPT → `aggregate_transactions` → totals → speak | `/transactions/aggregate`, formatter |
+| 7 | Multi-currency awareness | "Show me CAD payments only" | Currency filter in both search & aggregate | `currency` param everywhere |
+| 8 | Amount filters | "over fifty dollars", "below $5" | `min_amount_cents`, `max_amount_cents` | Same search route |
+| 9 | Date filters | "from last Monday", "today", "this week" | Approx date parsing -> period param | Built-in period map |
 |10 | Low-latency audio | Any sentence | Alloy TTS, cached MP3 blob, reused `<audio>` | `playAudio.js` cache Map |
 
-> 💡 **Business impact** – Together these features replicate 90 % of Stripe Dashboard's "Payments" tab hands-free, cutting lookup time from ~30 s (open laptop, filter UI) to <2 s spoken.
+💡 **Business impact** – Together these features replicate 90 % of Stripe Dashboard's "Payments" tab hands-free, cutting lookup time from ~30 s (open laptop, filter UI) to <2 s spoken.
 
 ---
 
@@ -223,3 +223,45 @@ GitHub Actions executes the same; coverage must stay green.
 ## 13 License & Conduct
 
 MIT License + Contributor Covenant 2.1 – see original sections.
+
+## 14 Demo script & live checklist
+
+### 14-A Pre-flight checks
+
+| Check | Command / Action | Expected |
+|-------|------------------|----------|
+| Homebrew installed | `brew --version` | prints version |
+| FFmpeg for Whisper | `ffmpeg -version` \| `brew install ffmpeg` | prints version |
+| Stripe CLI | `stripe version` | prints 1.x.y |
+| OpenAI quota | `curl https://api.openai.com/v1/dashboard/billing/credit_grants -H "Authorization: Bearer $OPENAI_API_KEY"` | JSON with >0 credits |
+| Mic permission (macOS) | System Settings → Privacy & Security → Microphone | Browser is toggled **on** |
+
+### 14-B Run-of-show (5 min)
+
+| Step | You do | Audience sees | Audience hears |
+|------|--------|--------------|----------------|
+| 1 | 🎤 "How much revenue did we make today?" | No UI change | Alloy: total revenue sentence |
+| 2 | 🎤 "List failed charges over fifty dollars." | Red `Failed` row highlighted | Alloy lists failed row(s) |
+| 3 | 🎤 "What's my available balance?" | Balance bar pulses | Alloy speaks amount |
+| 4 | 🎤 "Send twenty dollars to Alex." → 🎤 "Yes" | Modal → Checkout link | Alloy confirmation prompt |
+| 5 | Trigger `stripe trigger payment_intent.succeeded` in terminal | New green row pops | (optional WS) "Cha-ching!" |
+
+### 14-C Test-card cheat-sheet
+
+| Scenario | Payment method id | Effect |
+|----------|-------------------|--------|
+| Success | `pm_card_visa` | `payment_intent.succeeded` |
+| Declined | `pm_card_chargeDeclined` | `payment_intent.payment_failed` |
+| 3-D Secure | `pm_card_authenticationRequired` | Checkout shows challenge |
+
+### 14-D Common rescue maneuvers
+
+* **Mic blocked** – flip the browser toggle in macOS privacy, reload page.
+* **Webhook silent** – confirm `stripe listen` is running & `STRIPE_WEBHOOK_SECRET` matches.
+* **TTS 401/429** – check remaining OpenAI credits with command above.
+* **Better-sqlite missing** – `npm install better-sqlite3` inside `backend`.
+
+> With these items checked, the end-to-end demo runs in 
+> < 2 seconds per question and no internet besides Stripe + OpenAI APIs.
+
+---
