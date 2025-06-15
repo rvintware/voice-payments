@@ -27,6 +27,11 @@ export default function moneyToWords(cents, currencyName = 'Canadian') {
     parts.push(`${wordify(centsPart)} cent${centsPart === 1 ? '' : 's'}`);
   }
 
+  // Ensure we always say something (e.g. 0 dollars)
+  if (parts.length === 0) {
+    parts.push('zero dollars');
+  }
+
   const phrase = parts.join(' and ');
   const sign = cents < 0 ? 'minus ' : '';
   return `${sign}${phrase} ${currencyName.toLowerCase()} dollars`.trim();
