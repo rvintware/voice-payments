@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { FaMicrophone } from 'react-icons/fa';
 import { useBalance } from '../context/BalanceContext.jsx';
+import playSentence from '../utils/playAudio.js';
 
 export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
   const { availableCents, pendingCents } = useBalance();
@@ -103,6 +104,17 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
               alert('Could not speak balance');
               return;
             }
+          }
+
+          // After we get interpData
+          if (interpData.intent === 'speak' && interpData.sentence) {
+            try {
+              await playSentence(interpData.sentence);
+            } catch (err) {
+              console.error('TTS playback error', err);
+              alert('Could not play speech');
+            }
+            return;
           }
 
           // Hand over to confirmation dialog via callback if payment intent
