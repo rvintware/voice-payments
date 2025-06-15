@@ -22,6 +22,29 @@ All answered aloud in under a second.
 
 ---
 
+## 1.1 Patch v0.3.1 (2025-06-15) – Dev-proxy & Timeline Bug-fix
+
+| Reason | Change | File(s) |
+|--------|--------|---------|
+| Front-end 404s on `/api/transactions` | Added Vite dev-server proxy so any request beginning with `/api` is forwarded to the Express backend on port 4000. | `frontend/vite.config.js` (`server.proxy` block) |
+| Backend mount mismatch | Mounted `transactionsRouter` at `/api/transactions` (was `/api`) so the final path resolves to `/api/transactions` as documented. | `backend/src/app.js` |
+| Infinite fetch loop in React | The two fixes above turn previous 404 responses into 200, stopping the exponential re-tries in `useTransactions` and allowing the timeline component to render. | — |
+
+### Debug walkthrough (for the curious)
+1. **Symptom** – DevTools showed endless `404 /api/transactions?limit=25` plus React errors.
+2. **Hypothesis** – Either the proxy was missing or the server route path was wrong.
+3. **Confirmation**
+   • `curl http://localhost:4000/api/transactions` returned JSON ➜ route exists.<br/>
+   • Same URL via browser on port 5173 returned 404 ➜ proxy missing.<br/>
+4. **Fix 1** – Added Vite proxy.<br/>
+5. **Symptom persisted** – Now the browser hit `GET /api/transactions` on the backend and still saw 404. <br/>
+6. **Fix 2** – Realised router was mounted at `/api`, not `/api/transactions`; remounted correctly.
+7. **Result** – 200 OK, timeline feed populates, GPT "show my recent transactions" now succeeds.
+
+> Take-away: Always line-up **front-end fetch path → dev proxy → Express mount path**. A one-character drift causes silent 404s that look like "broken React".
+
+---
+
 ## 2 Feature matrix & details
 
 | # | Capability | User speaks… | System does | Tech bits |

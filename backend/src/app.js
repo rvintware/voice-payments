@@ -36,7 +36,7 @@ app.use('/api', voiceConfirmRouter);
 app.use('/api', balanceRouter);
 app.use('/api', interpretRouter);
 app.use('/api', ttsSayRouter);
-app.use('/api', transactionsRouter);
+app.use('/api/transactions', transactionsRouter);
 app.use('/api', searchRouter);
 app.use('/api', aggregateRouter);
 
