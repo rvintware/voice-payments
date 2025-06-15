@@ -348,6 +348,7 @@ Touching a single helper makes the new phrasing available to GPT, the REST layer
 * amounts = 0 → "zero dollars"  
 * singular vs plural cents/dollars  
 * negative values prepend "minus" (refunds)
+* zero totals and $0 transactions now speak "zero dollars" instead of truncating
 
 > With this appendix you can onboard a teammate in 30 s: "All speech lives in `speechTemplates.js`; the front-end just plays MP3s."
 
