@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import stripeWebhookRouter from './routes/stripeWebhook.js';
 
 // Load env variables
 dotenv.config();
@@ -9,8 +10,13 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use('/webhooks/stripe', stripeWebhookRouter);
+
+// Apply JSON parser after webhooks to preserve raw body for Stripe
 app.use(express.json());
+
+// Middleware
+app.use(cors({ origin: 'http://localhost:5173' }));
 
 // Routes
 import voiceRouter from './routes/voiceToText.js';
@@ -20,6 +26,7 @@ import voiceConfirmRouter from './routes/voiceConfirm.js';
 import balanceRouter from './routes/balance.js';
 import interpretRouter from './routes/interpret.js';
 import ttsSayRouter from './routes/ttsSay.js';
+import transactionsRouter from './routes/transactions.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
 app.use('/api', ttsRouter);
@@ -27,6 +34,7 @@ app.use('/api', voiceConfirmRouter);
 app.use('/api', balanceRouter);
 app.use('/api', interpretRouter);
 app.use('/api', ttsSayRouter);
+app.use('/api', transactionsRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });
