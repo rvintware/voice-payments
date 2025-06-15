@@ -288,3 +288,67 @@ MIT License + Contributor Covenant 2.1 – see original sections.
 > < 2 seconds per question and no internet besides Stripe + OpenAI APIs.
 
 ---
+
+## Appendix A Consistent Spoken Responses (v0.4)
+
+Speech output is now generated in a single, predictable way so that:
+
+* **UX stays familiar** – every balance or list sentence follows the same rhythm.
+* **Unit-testing is trivial** – deterministic strings, no React logic involved.
+* **Localisation** is one file away – swap templates, keep the rest of the stack.
+* **SSML / prosody tweaks** later require touching only the template helpers.
+
+### Key Modules
+
+| File | Responsibility |
+|------|----------------|
+| `backend/src/utils/moneyWords.js` | Converts integer cents → English words using `number-to-words`.  CJS module, imported via default export: `import toWordsPkg …; const { toWords } = toWordsPkg;`. |
+| `backend/src/utils/speechTemplates.js` | Pure functions that turn raw numbers / rows into **complete** sentences, e.g. `balanceSentence`, `listSentence`. |
+| `backend/src/utils/formatters.js` | Helpers that adapt DB rows or aggregates before handing them to the templates. |
+| `backend/src/routes/interpret.js` | GPT function-calling branch; fetches any required data, calls the templates, then returns `{ intent:'speak', sentence }`. |
+| `backend/src/routes/ttsSay.js` | Turns a sentence into Alloy MP3 using OpenAI TTS.  Stateless, cache lives in the browser. |
+| `frontend/src/utils/playAudio.js` | Browser-side cache + `<audio>` player.  Front-end **never** pieces sentences together. |
+
+### End-to-End Flow
+
+```mermaid
+sequenceDiagram
+  participant Mic
+  participant FE as Front-end
+  participant API
+  participant GPT
+  participant DB
+  participant TTS
+
+  Mic->>FE: user speech (webm)
+  FE->>API: /voice-to-text
+  API->>GPT: Whisper transcript → chat
+  GPT-->>API: function_call e.g. <query_balance>
+  API->>DB: fetch rows / cents
+  DB-->>API: JSON
+  API->>API: template → sentence
+  API-->>FE: { intent:"speak", sentence }
+  FE->>TTS: /api/tts/say { text }
+  TTS-->>FE: mp3 stream
+  FE->>Mic: 🔊 play audio
+```
+
+### Extending
+
+```js
+// Add a new spoken reply, e.g. monthly revenue
+export function revenueSentence({ period, totalCents }) {
+  return `Your revenue for ${period} is ${moneyToWords(totalCents)}.`;
+}
+```
+Touching a single helper makes the new phrasing available to GPT, the REST layer and the test-suite.
+
+### Edge-cases Covered
+
+* amounts = 0 → "zero dollars"  
+* singular vs plural cents/dollars  
+* negative values prepend "minus" (refunds)
+
+> With this appendix you can onboard a teammate in 30 s: "All speech lives in `speechTemplates.js`; the front-end just plays MP3s."
+
+---
