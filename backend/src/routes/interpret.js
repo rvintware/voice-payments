@@ -64,6 +64,32 @@ router.post('/interpret', async (req, res) => {
           required: []
         }
       },
+      {
+        name: 'search_transactions',
+        parameters: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['succeeded', 'processing', 'failed', 'incomplete'] },
+            min_amount_cents: { type: 'integer' },
+            max_amount_cents: { type: 'integer' },
+            currency: { type: 'string' },
+            from_date: { type: 'string' },
+            to_date: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 }
+          }
+        }
+      },
+      {
+        name: 'aggregate_transactions',
+        parameters: {
+          type: 'object',
+          properties: {
+            period: { type: 'string', enum: ['today', 'yesterday', 'week', 'month', 'year', 'all'], default: 'today' },
+            status: { type: 'string', enum: ['succeeded', 'failed', 'incomplete', 'all'], default: 'succeeded' },
+            currency: { type: 'string' }
+          }
+        }
+      },
     ];
 
     const chat = await openai.chat.completions.create({
@@ -102,6 +128,25 @@ router.post('/interpret', async (req, res) => {
         return res.status(422).json({ error: 'parse_incomplete', transcript });
       }
       return res.json({ intent: 'query_revenue', period });
+    } else if (fnCall.name === 'search_transactions') {
+      const filters = JSON.parse(fnCall.arguments || '{}');
+      const searchRes = await fetch('http://localhost:4000/api/transactions/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters)
+      });
+      const list = await searchRes.json();
+      const { formatList } = await import('../utils/formatters.js');
+      const sentence = formatList(list);
+      return res.json({ intent: 'speak', sentence });
+    } else if (fnCall.name === 'aggregate_transactions') {
+      const args = JSON.parse(fnCall.arguments || '{}');
+      const aggUrl = 'http://localhost:4000/api/transactions/aggregate?' + new URLSearchParams(args);
+      const aggRes = await fetch(aggUrl);
+      const summary = await aggRes.json();
+      const { formatSummary } = await import('../utils/formatters.js');
+      const sentence = formatSummary(summary, args);
+      return res.json({ intent: 'speak', sentence });
     }
 
     return res.status(422).json({ error: 'parse_failed', transcript });
