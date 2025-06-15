@@ -16,8 +16,11 @@ router.post('/interpret', async (req, res) => {
         role: 'system',
         content:
           `You interpret user utterances for a voice banking app.
-           If the user wants to make a payment, call create_payment.
-           If the user asks for their balance (available, pending or both), call query_balance.`,
+           ALWAYS respond with a JSON function_call and NEVER plain text.
+           • "send/pay/give X dollars to NAME" → create_payment { amount_cents, recipient_email }
+           • "what's my pending/available/both balance" → query_balance { type }
+           • "show my recent transactions" → query_recent_transactions { limit }
+           Recipient email: if user only says the name, lower-case it and append "@gmail.com".`,
       },
       { role: 'user', content: transcript },
     ];
@@ -96,6 +99,8 @@ router.post('/interpret', async (req, res) => {
       model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo',
       messages,
       functions,
+      function_call: 'auto',
+      temperature: 0.2,
     });
 
     const fnCall = chat.choices[0].message.function_call;
