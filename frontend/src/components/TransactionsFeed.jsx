@@ -18,7 +18,7 @@ function Amount({ cents, currency }) {
 }
 
 export default function TransactionsFeed() {
-  const { transactions, fetchMore, hasMore, loading } = useTransactionsContext();
+  const { transactions, fetchMore, hasMore } = useTransactionsContext();
   const sentinel = useRef(null);
 
   useEffect(() => {
@@ -49,7 +49,6 @@ export default function TransactionsFeed() {
             {tx.description && <p className="text-sm mt-1">{tx.description}</p>}
           </li>
         ))}
-        {loading && <li className="text-center text-gray-400">Loading…</li>}
         {hasMore && <li ref={sentinel} />}
       </ul>
     </div>
