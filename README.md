@@ -567,3 +567,33 @@ Example: 100 ¢ among 3 ➜ `[33, 33, 34]`.
 | React | `frontend/__tests__/SplitLinksDialog.test.jsx` | Renders names & amounts; link copy |
 
 ---
+
+### Appendix D Unified Confirmation Overlay (2025-06)
+
+The June 2025 refactor collapsed the old two-modal flow (dark confirmation card → white result card) into a **single, stateful overlay**.
+
+Highlights
+* One visual component with two internal phases → eliminates flicker and styling drift.
+* Accessibility: focus-trap, Esc to cancel, reduced-motion compliance.
+* Consistent step badge (“Step 1 of 2” → “Step 2 of 2”) tells the user where they are.
+* Auto-copies and opens the single Checkout link; split-bill still lists multiple links.
+* Error phase with Retry / Cancel buttons reuses the same container.
+
+Sequence diagram
+```mermaid
+sequenceDiagram
+  participant User
+  participant Mic as VoiceButton
+  participant UI as UnifiedDialog
+  participant API as /api/voice-confirm
+
+  User->>Mic: hold + say "yes" / "no"
+  Mic->>API: POST audio + payload
+  API-->>Mic: { url } | { retry } | { cancelled }
+  Mic-->>UI: linkObj | retry | cancel
+  UI-->>User: morph to result / error / close
+```
+
+Take-away: consolidating feedback surfaces makes it **immediately obvious** which stage the voice flow is in and reduces the code we have to maintain.
+
+---
