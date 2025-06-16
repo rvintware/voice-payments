@@ -442,3 +442,128 @@ sequenceDiagram
 > **Take-away:** Hybrid back-fill ＋ idempotent webhooks keeps the local DB within seconds of Stripe while retaining sub-2 ms UI queries.
 
 ---
+
+## Appendix C Bill-Splitting (Going Dutch)
+
+### C.1 Why we added it
+* Friends often need to split drinks / rides; pulling out phones breaks the voice-first flow.
+* Stripe Checkout already handles payment collection & receipts – we just needed to issue **multiple** links instead of one.
+* Letting the caller pay nothing upfront keeps the feature risk-free.
+
+### C.2 Stripe design
+| Object | 1 per | Notes |
+|--------|-------|-------|
+| **Checkout Session** | Friend | Simplest way to give each person their own hosted pay-page. Funds settle to the caller's Stripe account once each friend pays. |
+| PaymentIntent | (inside session) | Price is fixed at their share of the bill. |
+
+Why not one session with several line-items? Because Checkout would group all items into **one** card payment – the caller would have to pay first.
+
+### C.3 REST route – `/api/split`
+```http
+POST /api/split
+{
+  "total_cents": 12000,
+  "currency"   : "usd",
+  "friends"    : [
+    { "name": "Alice", "email": "alice@example.com" },
+    { "name": "Bob" }                       // email optional
+  ]
+}
+→ 200 OK
+{
+  "links": [
+    { "name":"Alice", "amount_cents":6000, "url":"https://checkout.stripe.com/pay/cs_test_…" },
+    { "name":"Bob",   "amount_cents":6000, "url":"https://checkout.stripe.com/pay/cs_test_…" }
+  ]
+}
+```
+See `backend/src/routes/splitBill.js` for full implementation.
+
+### C.4 GPT function definition
+Inside `routes/interpret.js`:
+```jsonc
+{
+  "name": "split_bill",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "total_cents": { "type": "integer" },
+      "currency":    { "type": "string", "default": "usd" },
+      "friends": {
+        "type": "array",
+        "items": { "type": "object", "properties": {
+          "name": { "type": "string" },
+          "email":{ "type": "string" }
+        }, "required": ["name"] },
+        "minItems": 1
+      }
+    },
+    "required": ["total_cents", "friends"]
+  }
+}
+```
+
+### C.5 End-to-end flow
+```mermaid
+sequenceDiagram
+    participant U  as User (mic)
+    participant FE as Front-end
+    participant GPT as /interpret (GPT)
+    participant API as /api/split
+    participant SC as Stripe Checkout
+    participant WH as Webhook
+
+    U ->> FE: "Split the $120 bill between Alice and Bob"
+    FE ->> GPT: { transcript }
+    GPT -->> FE: { intent:"split_links", total, friends }
+    FE ->> API: POST /api/split { total, friends }
+    API ->> SC: create 2 Checkout Sessions
+    SC -->> API: { url_A, url_B }
+    API -->> FE: links[]
+    FE ->> U: show modal + copy links to clipboard
+    Note over U: Each friend pays separately
+    SC -->> WH: payment_intent.succeeded (per friend)
+    WH ->> DB: UPSERT row → timeline feed
+```
+
+### C.6 Share-calculation rules
+* Base share = `floor(total / n)` cents.
+* Any remainder (odd cents) is added **from the end of the array backwards** so the caller's early friends don't over-pay – implemented in `equalSplit()`.
+* Negative or zero totals throw – validated at route layer.
+
+Example: 100 ¢ among 3 ➜ `[33, 33, 34]`.
+
+### C.7 Utterance table
+| Pattern spoken | Parsed result |
+|----------------|---------------|
+| "Split 60 dollars with Alice and Bob" | equal split (2 × $30) |
+| "I'll cover my half, have Bob and Carol pay the rest" | caller-covers mode (not yet implemented – future work) |
+| "Divide 45 by three" | generic math ➜ `$15` each |
+
+### C.8 Failure modes & guards
+| Scenario | Prevention / Handling |
+|----------|----------------------|
+| Friend email missing | Checkout `customer_email` left blank → still works, but e-mail receipt skipped. |
+| Odd cents (e.g. $0.01) | Remainder cent handed to last participant; totals still match. |
+| Stripe API error | Express route catches & returns `500 split_failed` – FE shows `alert`. |
+
+### C.9 Alternatives considered
+| Design | Pros | Cons |
+|--------|------|------|
+| One Checkout Session with multiple line-items | Only 1 URL | Caller pays upfront, can't enforce individual payments |
+| Payment Links API | No backend code | No automatic webhook → DB drift; limited metadata |
+| Invoice per friend | Built-in reminders | Heavier flow; requires collecting postal address etc. |
+
+### C.10 Front-end UX
+* `SplitLinksDialog.jsx` modal lists **Name + Amount + Copy Link** per friend.
+* Clipboard auto-populated with all URLs for quick paste into chat apps.
+* Modal closes on **Close** button or background click.
+
+### C.11 Test inventory
+| Layer | Test file | What it covers |
+|-------|-----------|----------------|
+| Util  | `backend/tests/shareCalculator.test.js` | Even split & remainder logic |
+| API   | `backend/tests/splitBillRoute.test.js` | 200 OK & 2 links returned |
+| React | `frontend/__tests__/SplitLinksDialog.test.jsx` | Renders names & amounts; link copy |
+
+---
