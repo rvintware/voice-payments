@@ -29,3 +29,4 @@ backend/data/stripe.db
 # Generated SQLite DBs
 backend/data/.db
 backend/backend/data/.db
+backend/backend/data/stripe.db
