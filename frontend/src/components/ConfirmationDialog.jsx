@@ -20,7 +20,15 @@ export default function ConfirmationDialog({ amountCents, recipientEmail, onPaym
           <VoiceButton
             mode="answer"
             answerPayload={{ amountCents, recipientEmail }}
-            onPaymentLink={onPaymentLink}
+            onPaymentLink={(url) => {
+              const linkObj = {
+                name,
+                amount_cents: amountCents,
+                currency: 'usd',
+                url,
+              };
+              onPaymentLink(linkObj);
+            }}
             onCancel={onCancel}
           />
         )}
