@@ -25,3 +25,7 @@ yarn-error.log*
 # Coverage
 coverage/
 backend/data/stripe.db
+
+# Generated SQLite DBs
+backend/data/.db
+backend/backend/data/.db
