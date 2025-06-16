@@ -45,6 +45,17 @@ All answered aloud in under a second.
 
 ---
 
+## 1.2 Patch v0.3.2 (2025-06-16) – Stripe sync & enriched timeline
+
+| Reason | Change | File(s) |
+|--------|--------|---------|
+| Stripe ↔ SQLite drift | On-boot back-fill helper `syncStripePayments` pulls recent PaymentIntents so the local mirror always matches the Dashboard. | `backend/src/utils/stripeSync.js`, `backend/src/app.js` |
+| Show customer in feed | Added `customer_email` column, captured by webhook & back-fill. | `backend/src/utils/db.js`, `stripeWebhook.js` |
+| Timeline UI lacked e-mail | Feed renders e-mail under amount. | `frontend/TransactionsFeed.jsx` |
+| Filter via URL | `/api/transactions` now supports `?status=succeeded|failed|all` for lighter payloads. | `backend/routes/transactions.js` |
+
+---
+
 ## 2 Feature matrix & details
 
 | # | Capability | User speaks… | System does | Tech bits |
@@ -116,6 +127,7 @@ CREATE TABLE payments (
   description TEXT,
   card_brand TEXT,
   last4 TEXT,
+  customer_email TEXT,
   created_at TEXT,         -- ISO8601
   updated_at TEXT
 );
@@ -136,7 +148,7 @@ The DB lives in `backend/data/stripe.db` (or `DB_PATH`).  All read queries are s
 ### 6-B.  Public REST (frontend ↔ backend)
 | Method | Path | Params / Body | Description |
 |--------|------|---------------|-------------|
-| GET | `/api/transactions` | limit, starting_after | Infinite-scroll feed |
+| GET | `/api/transactions` | limit, starting_after, **status** | Infinite-scroll feed |
 | POST | `/api/transactions/search` | JSON filters | Flexible finder |
 | GET | `/api/transactions/aggregate` | period, status, currency | Totals & averages |
 | *(legacy)* | `/api/balance` etc. | | Older voice features |

@@ -27,9 +27,9 @@ router.post('/', express.raw({ type: 'application/json' }), (req, res) => {
   if (event.type.startsWith('payment_intent.')) {
     const pi = event.data.object;
     // UPSERT into DB
-    const stmt = db.prepare(`INSERT INTO payments (id, amount, currency, status, description, card_brand, last4, created_at, updated_at)
-      VALUES (@id, @amount, @currency, @status, @description, @card_brand, @last4, @created_at, @updated_at)
-      ON CONFLICT(id) DO UPDATE SET amount=excluded.amount, status=excluded.status, description=excluded.description, updated_at=excluded.updated_at`);
+    const stmt = db.prepare(`INSERT INTO payments (id, amount, currency, status, description, card_brand, last4, customer_email, created_at, updated_at)
+      VALUES (@id, @amount, @currency, @status, @description, @card_brand, @last4, @customer_email, @created_at, @updated_at)
+      ON CONFLICT(id) DO UPDATE SET amount=excluded.amount, status=excluded.status, description=excluded.description, card_brand=excluded.card_brand, last4=excluded.last4, customer_email=excluded.customer_email, updated_at=excluded.updated_at`);
     stmt.run({
       id: pi.id,
       amount: pi.amount_received ?? pi.amount,
@@ -38,6 +38,7 @@ router.post('/', express.raw({ type: 'application/json' }), (req, res) => {
       description: pi.description ?? '',
       card_brand: pi.charges?.data[0]?.payment_method_details?.card?.brand ?? '',
       last4: pi.charges?.data[0]?.payment_method_details?.card?.last4 ?? '',
+      customer_email: pi.customer?.email ?? pi.charges?.data?.[0]?.billing_details?.email ?? '',
       created_at: new Date(pi.created * 1000).toISOString(),
       updated_at: new Date().toISOString()
     });
