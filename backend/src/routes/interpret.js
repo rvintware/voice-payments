@@ -20,6 +20,7 @@ router.post('/interpret', async (req, res) => {
            • "send/pay/give X dollars to NAME" → create_payment { amount_cents, recipient_email }
            • "what's my pending/available/both balance" → query_balance { type }
            • "show my recent transactions" → query_recent_transactions { limit }
+           • "split X dollars three ways with Alice and Bob" → split_bill { total_cents, currency, friends }
            Recipient email: if user only says the name, lower-case it and append "@gmail.com".`,
       },
       { role: 'user', content: transcript },
@@ -91,6 +92,29 @@ router.post('/interpret', async (req, res) => {
             status: { type: 'string', enum: ['succeeded', 'failed', 'incomplete', 'all'], default: 'succeeded' },
             currency: { type: 'string' }
           }
+        }
+      },
+      {
+        name: 'split_bill',
+        parameters: {
+          type: 'object',
+          properties: {
+            total_cents: { type: 'integer' },
+            currency: { type: 'string', default: 'usd' },
+            friends: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  email: { type: 'string' }
+                },
+                required: ['name']
+              },
+              minItems: 1
+            }
+          },
+          required: ['total_cents', 'friends']
         }
       },
     ];
@@ -181,6 +205,27 @@ router.post('/interpret', async (req, res) => {
       const { formatSummary } = await import('../utils/formatters.js');
       const sentence = formatSummary(summary, args);
       return res.json({ intent: 'speak', sentence });
+    } else if (fnCall.name === 'split_bill') {
+      const args = JSON.parse(fnCall.arguments || '{}');
+      const { total_cents: totalCents, currency = 'usd', friends } = args;
+      if (!totalCents || !Array.isArray(friends) || friends.length === 0) {
+        return res.status(422).json({ error: 'parse_incomplete', transcript });
+      }
+      // Call internal split route
+      const splitRes = await fetch('http://localhost:4000/api/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ total_cents: totalCents, currency, friends })
+      });
+      if (!splitRes.ok) {
+        console.error('split route failed', await splitRes.text());
+        return res.status(500).json({ error: 'split_failed' });
+      }
+      const json = await splitRes.json();
+      // Build spoken sentence listing links
+      const linkList = json.links.map(l => `${l.name}: ${ (l.amount_cents/100).toFixed(2) }`).join(', ');
+      const sentence = `I have created the payment links. ${linkList}. I've copied them to your clipboard.`;
+      return res.json({ intent: 'split_links', links: json.links, sentence });
     }
 
     return res.status(422).json({ error: 'parse_failed', transcript });

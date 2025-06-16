@@ -4,14 +4,19 @@ import PaymentResult from './components/PaymentResult.jsx';
 import ConfirmationDialog from './components/ConfirmationDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
 import TransactionsFeed from './components/TransactionsFeed.jsx';
+import SplitLinksDialog from './components/SplitLinksDialog.jsx';
 
 export default function App() {
   const [paymentLink, setPaymentLink] = useState(null);
-  const [commandData, setCommandData] = useState(null); // {amountCents,recipientEmail}
+  const [commandData, setCommandData] = useState(null); // payment intent command
+  const [splitData, setSplitData] = useState(null); // { links, sentence }
 
-  function handleCommand(_, data) {
-    // data contains amountCents,recipientEmail from interpreter
-    if (data) setCommandData(data);
+  function handleCommand(kind, data) {
+    if (kind === 'split') {
+      setSplitData(data);
+    } else if (data) {
+      setCommandData(data);
+    }
   }
 
   function reset() {
@@ -23,7 +28,7 @@ export default function App() {
     <main className="flex flex-col items-center justify-center w-full min-h-screen gap-8 p-4">
       <h1 className="text-2xl font-semibold">Voice Payments MVP</h1>
       <BalanceBar />
-      {!commandData && (
+      {!commandData && !splitData && (
         <VoiceButton mode="command" onPaymentLink={handleCommand} />
       )}
       {commandData && !paymentLink && (
@@ -34,6 +39,7 @@ export default function App() {
           onCancel={reset}
         />
       )}
+      {splitData && <SplitLinksDialog links={splitData.links} onClose={() => setSplitData(null)} />}
       <PaymentResult url={paymentLink} />
       <TransactionsFeed />
     </main>
