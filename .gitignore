@@ -24,3 +24,4 @@ yarn-error.log*
 
 # Coverage
 coverage/
+backend/data/stripe.db
