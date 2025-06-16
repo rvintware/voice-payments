@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import VoiceButton from './components/VoiceButton.jsx';
-import PaymentResult from './components/PaymentResult.jsx';
+import PaymentLinkDialog from './components/PaymentLinkDialog.jsx';
 import ConfirmationDialog from './components/ConfirmationDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
 import TransactionsFeed from './components/TransactionsFeed.jsx';
 import SplitLinksDialog from './components/SplitLinksDialog.jsx';
 
 export default function App() {
-  const [paymentLink, setPaymentLink] = useState(null);
+  const [paymentLink, setPaymentLink] = useState(null); // will hold link object
   const [commandData, setCommandData] = useState(null); // payment intent command
   const [splitData, setSplitData] = useState(null); // { links, sentence }
 
@@ -35,12 +35,14 @@ export default function App() {
         <ConfirmationDialog
           amountCents={commandData.amountCents}
           recipientEmail={commandData.recipientEmail}
-          onPaymentLink={(url) => setPaymentLink(url)}
+          onPaymentLink={(linkObj) => setPaymentLink(linkObj)}
           onCancel={reset}
         />
       )}
       {splitData && <SplitLinksDialog links={splitData.links} onClose={() => setSplitData(null)} />}
-      <PaymentResult url={paymentLink} />
+      {paymentLink && (
+        <PaymentLinkDialog link={paymentLink} onClose={() => setPaymentLink(null)} />
+      )}
       <TransactionsFeed />
     </main>
   );

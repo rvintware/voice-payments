@@ -148,7 +148,13 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
           });
           const data = await res.json();
           if (data.url) {
-            onPaymentLink?.(data.url);
+            const linkObj = {
+              name: answerPayload.recipientEmail?.split('@')[0] || 'Friend',
+              amount_cents: answerPayload.amountCents,
+              currency: 'usd',
+              url: data.url,
+            };
+            onPaymentLink?.(linkObj);
           } else if (data.cancelled) {
             alert('Payment cancelled');
             onCancel?.();
