@@ -117,6 +117,18 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             return;
           }
 
+          // After speak intent handling block
+          if (interpData.intent === 'split_links' && interpData.links) {
+            try {
+              await navigator.clipboard.writeText(interpData.links.map(l => l.url).join('\n'));
+            } catch (err) {
+              /* eslint-disable no-console */
+              console.warn('Clipboard write failed');
+            }
+            onPaymentLink?.('split', interpData);
+            return;
+          }
+
           // Hand over to confirmation dialog via callback if payment intent
           if (interpData.amountCents && interpData.recipientEmail) {
             onPaymentLink?.(null, { ...interpData, transcript: vtData.transcript });
