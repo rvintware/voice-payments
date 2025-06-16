@@ -37,8 +37,11 @@ export default function TransactionsFeed() {
         {transactions.map(tx => (
           <li key={tx.id} className="pl-4 mb-6 animate-slide-up-fade">
             <span className="absolute -left-1.5 top-2 h-3 w-3 rounded-full bg-blue-500" />
-            <div className="flex justify-between items-center gap-4">
-              <Amount cents={tx.amount} currency={tx.currency} />
+            <div className="flex justify-between items-start gap-4">
+              <div>
+                <Amount cents={tx.amount} currency={tx.currency} />
+                {tx.customer_email && <p className="text-xs text-gray-600">{tx.customer_email}</p>}
+              </div>
               <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusClasses[tx.status] || 'bg-gray-200 text-gray-700'}`}>
                 {tx.status.replaceAll('_', ' ')}
               </span>

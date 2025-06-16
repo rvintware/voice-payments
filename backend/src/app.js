@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import stripeWebhookRouter from './routes/stripeWebhook.js';
+import { syncStripePayments } from './utils/stripeSync.js';
 
 // Load env variables
 dotenv.config();
@@ -44,11 +45,19 @@ app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });
 });
 
-export default app;
-
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    /* eslint-disable no-console */
-    console.log(`Server listening at http://localhost:${PORT}`);
-  });
+  (async () => {
+    try {
+      await syncStripePayments();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Stripe back-fill failed', err);
+    }
+    app.listen(PORT, () => {
+      // eslint-disable-next-line no-console
+      console.log(`Server listening at http://localhost:${PORT}`);
+    });
+  })();
 }
+
+export default app;
