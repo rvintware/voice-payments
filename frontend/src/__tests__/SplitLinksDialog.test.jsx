@@ -11,7 +11,8 @@ describe('SplitLinksDialog', () => {
   it('shows names and amounts', () => {
     render(<SplitLinksDialog links={links} onClose={() => {}} />);
     expect(screen.getByText('Alice')).toBeInTheDocument();
-    expect(screen.getByText('$40.00')).toBeInTheDocument();
+    const amounts = screen.getAllByText('$40.00');
+    expect(amounts).toHaveLength(2); // one per friend
   });
 
   it('copies link on button click', async () => {
