@@ -22,7 +22,7 @@ export default function App() {
   }
 
   return (
-    <main className="flex flex-col items-center justify-center w-full min-h-screen gap-8 p-4">
+    <main className="flex flex-col items-center w-full min-h-screen gap-8 p-4">
       <h1 className="text-2xl font-semibold">Voice Payments MVP</h1>
       <BalanceBar />
       {!dialogPayload && !splitData && (
@@ -35,7 +35,16 @@ export default function App() {
           onCancel={closeDialog}
         />
       )}
-      {splitData && <SplitLinksDialog links={splitData.links} onClose={() => setSplitData(null)} />}
+      {/* Transaction history – infinite scroll */}
+      <div className="w-full max-w-xl">
+        <TransactionsFeed />
+      </div>
+      {splitData && (
+        <SplitLinksDialog
+          links={splitData.links}
+          onClose={() => setSplitData(null)}
+        />
+      )}
     </main>
   );
 }
