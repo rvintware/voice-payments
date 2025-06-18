@@ -192,3 +192,122 @@ server: {
 ---
 
 With this design the app stays PCI-safe while delivering a modern, fluid voice UX where the user can pivot mid-sentence without ever losing accuracy or control. 
+
+---
+
+## 11 Living Development TOC (keep expanding)
+
+> Every milestone below should get its own `docs/interruptions/0X_*.md` file as work progresses.
+
+### 11.1 Overview & Vision
+- Why conversational interruptions matter
+- Latency / safety targets
+- Success metrics
+
+### 11.2 Architecture Primer
+- On- vs off-device split
+- FSM diagram recap
+- Risk taxonomy
+
+### 11.3 Milestone-01 — Socket Plumbing
+
+#### 11.3.1 Scope & rationale  
+We can't stream VAD events, transcripts or TTS chunks unless a **real-time transport** already exists.  Getting a basic WebSocket round-trip working first removes risk early and gives the team a live playground.
+
+#### 11.3.2 Technical design  
+| Layer | File / Path | Notes |
+|-------|-------------|-------|
+| Backend WS helper | `backend/src/conversation/ws.js` | Wraps Node `WebSocketServer`, path `/ws/session`, sends `hello`, echoes `pong`. |
+| Express hook-up | `backend/src/app.js` | When `INTERRUPTIONS_MVP=true`, wraps Express in `httpServer` then `attachWS(httpServer)`. |
+| Front-end singleton | `frontend/src/conversation/socketSingleton.js` | Guarantees **one** socket despite React StrictMode. Exposes `window.ws` in dev. |
+| React hook | `frontend/src/conversation/useConversationWS.js` | Calls singleton, returns `{send}` for components. |
+| Feature flag | `.env` / `.env.local` | `INTERRUPTIONS_MVP` (backend) + `VITE_INTERRUPTIONS_MVP` (front-end). |
+| Dev proxy | `frontend/vite.config.js` | Added `/ws` proxy to `localhost:4000`, `ws:true`. |
+
+#### 11.3.3 Implementation timeline & PRs  
+| Date | PR | Summary |
+|------|----|---------|
+| 2025-06-17 | #112 | Add ws helper + proxy + env flags |
+| 2025-06-17 | #113 | Singleton + StrictMode fix |
+
+#### 11.3.4 Key decisions & trade-offs  
+* **`ws` vs `socket.io`** – chose bare `ws` (smaller bundle, no fallbacks needed for modern browsers).  
+* **Singleton pattern** – avoids ECONNRESET noise from StrictMode and prevents accidental multiple sockets later.  
+* **Keep React StrictMode ON** – we value its dev-time warnings; singleton makes it safe.  
+* **Expose `window.ws` only in dev** – useful for manual ping/pong, stripped out in production build.
+
+#### 11.3.5 Dev setup & env flags  
+```bash
+# backend/.env
+INTERRUPTIONS_MVP=true
+
+# frontend/.env
+VITE_INTERRUPTIONS_MVP=true
+```
+Dependencies installed:
+```bash
+npm --prefix backend i ws xstate
+npm --prefix frontend i ws voice-activity-detection @xstate/fsm
+```
+
+#### 11.3.6 Testing & validation  
+1. **Manual** – Browser console logs `[WS] open (singleton)` and `{type:'hello'}`.  
+   ```js
+   window.ws.send(JSON.stringify({type:'ping'})) // → {type:'pong'}
+   ```
+2. **Integration (Vitest)** – mock WebSocket server, assert client receives `hello` payload.  *(test file to be added later)*
+3. **CI** – added `ws` deps to install step; no lint errors.
+
+#### 11.3.7 Bugs & fixes  
+| Issue | Fix |
+|-------|-----|
+| `WebSocket is closed before connection` due to StrictMode double-mount | Switched to singleton; removed per-mount `ws.close()` cleanup. |
+| React duplicate-key warning in `TransactionsFeed` polluted console | Composite key `id-created_at` now used. |
+
+#### 11.3.8 Retro notes  
+* Having a live socket early allowed rapid experimentation with VAD messages.  
+* Singleton pattern turned out simpler than disabling StrictMode; we'll replicate the approach for any future global connection (e.g. TTS streaming).
+
+---
+
+### 11.4 Milestone-02 — Browser VAD + AudioPlayer
+- Library choice & threshold tuning
+- Pause/resume contract
+- Unit/perf tests
+- Open questions
+
+### 11.5 Milestone-03 — Streaming ASR
+- OpenAI Audio WS configuration
+- Chunk format, back-pressure
+- Integration tests
+
+### 11.6 Milestone-04 — FSM Core & Risk Routing
+- xstate machine JSON
+- GPT tool `risk` tag addition
+- ConfirmWait logic
+- xstate/test plan
+
+### 11.7 Milestone-05 — UX & Confirmation Overlay
+- UnifiedDialog update
+- Accessibility shortcuts
+- Playwright E2E script
+
+### 11.8 Performance & Monitoring
+- p95 barge-in metric
+- Grafana dashboard link
+
+### 11.9 Security & Compliance
+- Session cookie details
+- No raw-audio storage
+- Audit logging
+
+### 11.10 Future Enhancements
+- On-device ASR
+- Multi-step MCP
+- Personalised voice styles
+
+### 11.11 Appendices
+A. Full WS message schemas  
+B. Env-var reference  
+C. Troubleshooting guide  
+D. Glossary (VAD, FSM, MCP, …) 

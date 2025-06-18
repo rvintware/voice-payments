@@ -5,6 +5,7 @@ import BalanceBar from './components/BalanceBar.jsx';
 import TransactionsFeed from './components/TransactionsFeed.jsx';
 import SplitLinksDialog from './components/SplitLinksDialog.jsx';
 import useConversationWS from './conversation/useConversationWS.js';
+import useVAD from './conversation/useVAD.js';
 
 export default function App() {
   const [dialogPayload, setDialogPayload] = useState(null); // holds data for unified dialog
@@ -12,6 +13,8 @@ export default function App() {
 
   // Initialise WebSocket for interruptions MVP (no UI impact)
   useConversationWS();
+  // Initialise VAD for barge-in
+  useVAD();
 
   function handleCommand(kind, data) {
     if (kind === 'split') {

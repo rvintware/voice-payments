@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { FaMicrophone } from 'react-icons/fa';
 import { useBalance } from '../context/BalanceContext.jsx';
 import playSentence from '../utils/playAudio.js';
+import { pauseAll } from '../audio/AudioPlayer.js';
+import { getSocket } from '../conversation/socketSingleton.js';
 
 export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
   const { availableCents, pendingCents } = useBalance();
@@ -22,6 +24,16 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
+
+      if (import.meta.env.VITE_INTERRUPTIONS_MVP === 'true') {
+        pauseAll();
+        try {
+          getSocket().send(JSON.stringify({ type: 'vad_interrupt' }));
+        } catch (err) {
+          console.warn('WS not ready for vad_interrupt', err);
+        }
+      }
+
       mediaRecorder.start();
       startTimeRef.current = Date.now();
       setIsRecording(true);
@@ -97,8 +109,8 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
               });
               const blob = await ttsRes.blob();
               const url = URL.createObjectURL(blob);
-              const audio = new Audio(url);
-              audio.play();
+              const { play } = await import('../audio/AudioPlayer.js');
+              play(Date.now().toString(), url);
               return; // Do not proceed to payment flow
             } catch (err) {
               alert('Could not speak balance');

@@ -1,5 +1,5 @@
+import { play as playAudioElem } from '../audio/AudioPlayer.js';
 const cache = new Map();
-let player = null;
 
 export default async function playSentence(text) {
   if (!text) return;
@@ -18,7 +18,5 @@ export default async function playSentence(text) {
   }
 
   const url = URL.createObjectURL(blob);
-  if (!player) player = new Audio();
-  player.src = url;
-  await player.play();
+  playAudioElem(Date.now().toString(), url);
 } 
