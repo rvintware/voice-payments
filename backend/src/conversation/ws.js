@@ -17,6 +17,13 @@ export function attachWS(httpServer) {
         const msg = JSON.parse(data);
         if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+        } else if (msg.type === 'vad_interrupt') {
+          // Broadcast pause_audio to all sockets on this server
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) {
+              client.send(JSON.stringify({ type: 'pause_audio' }));
+            }
+          });
         }
       } catch (err) {
         // ignore malformed JSON for now
