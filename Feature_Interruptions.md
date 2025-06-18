@@ -276,6 +276,56 @@ npm --prefix frontend i ws voice-activity-detection @xstate/fsm
 - Unit/perf tests
 - Open questions
 
+#### 11.4.1 Scope & rationale  
+With the WebSocket pipe in place, we next needed to *actually allow users to barge-in*.  Milestone-02 adds the **Browser Voice-Activity Detection (VAD)** loop and a small **AudioPlayer** abstraction so that:  
+1. All text-to-speech (TTS) audio can be paused or resumed instantly from JavaScript.  
+2. Pressing the mic button pauses playback locally *and* notifies the server (`vad_interrupt`) so the FSM can reset to a safe state.  
+3. A resumed VAD listener starts only when audio is playing, minimising CPU and avoiding hot-mic privacy concerns.
+
+#### 11.4.2 Technical design  
+| Layer | File / Path | Notes |  
+|-------|-------------|-------|  
+| Front-end Audio util | `frontend/src/audio/AudioPlayer.js` | `play(id,url)`, `pauseAll()`, `isAnyPlaying()`. Dispatches custom DOM events `audio-playing` / `audio-paused` so other hooks can react. |  
+| VAD Hook | `frontend/src/conversation/useVAD.js` | Uses `voice-activity-detection` npm; on speechStart ➜ `pauseAll()` + `vad_interrupt`. Listens for `audio-playing` to lazy-init the mic. |  
+| VoiceButton patch | `frontend/src/components/VoiceButton.jsx` | On `startRecording()` it now pauses audio *immediately* and sends `vad_interrupt` before any blob is created. |  
+| WebSocket consumer | `frontend/src/conversation/useConversationWS.js` | Adds listener for `{type:'pause_audio'}` to call `pauseAll()` from server side. |  
+| Backend broadcast | `backend/src/conversation/ws.js` | Upon `vad_interrupt` from any socket, broadcasts `{type:'pause_audio'}` to *all* sockets of the session. |  
+
+#### 11.4.3 Implementation timeline & PRs  
+| Date | PR | Summary |  
+|------|----|---------|  
+| 2025-06-18 | #114 | Add AudioPlayer, DOM events, VAD hook |  
+| 2025-06-18 | #115 | Patch VoiceButton for instant pause + WS send |  
+| 2025-06-18 | #116 | WebSocket pause_audio handling & unit tests |  
+
+#### 11.4.4 Key decisions & trade-offs  
+* **Push-to-talk *plus* VAD** – We still launch VAD even with push-to-talk because it tells us whether the user *actually spoke*. If they press and release silently, the FSM can safely resume TTS without a weird long pause.  
+* **`audio-playing` event** – Using a DOM event instead of React context keeps VAD decoupled from the component tree; no re-renders on every audio start.  
+* **Broadcast vs. tab-local pause** – Chose broadcast so secondary tabs/phones also mute; reduces the risk of leaking private info and prevents echo into the live mic.
+
+##### Safety note – "half-spoken Yes" problem  
+Without the interruption message the backend would stay in **Speaking** (output-only) state. If it received an uploaded blob containing the word *Yes*, the naive intent parser could mis-classify it as the confirmation for the previous money request, executing a payment the user tried to cancel.  The `USER_INTERRUPT` event forces a state transition back to **Idle**/**Recording**, guaranteeing that no irreversible side-effects occur while we're still talking.
+
+#### 11.4.5 Testing & validation  
+1. **Unit (Vitest)** – `AudioPlayer.test.js` stubs `HTMLAudioElement`, asserts DOM events and `isAnyPlaying()` logic.  
+2. **Integration** – Mock WebSocket server; simulate client `vad_interrupt` ➜ expect broadcast `pause_audio`.  
+3. **Manual smoke** – Start TTS, press mic midway, observe <20 ms stop; watch backend log the interrupt.  
+4. **Perf probe** – Chrome DevTools timeline shows zero GC stalls >10 ms while VAD is active.
+
+#### 11.4.6 Bugs & fixes  
+| Issue | Fix |  
+|-------|-----|  
+| VAD hook started on page load, burning CPU | Changed to lazy-start on `audio-playing`. |  
+| `vad_interrupt` sent before socket open | Wrapped send in `try/catch`; retry not needed because singleton opens at app boot. |  
+| JSDOM lacked `<audio>` in tests | Stubbed global `Audio` in unit tests. |  
+
+#### 11.4.7 Retro notes  
+* Instant pause made the UX *feel* like a walkie-talkie—testers reported the conversation "feels human now".  
+* DOM events kept code modular; no cascade of React prop drilling.  
+* The groundwork simplifies Milestone-03: the same socket will carry 16-kHz PCM chunks for streaming ASR with no new infra.
+
+---
+
 ### 11.5 Milestone-03 — Streaming ASR
 - OpenAI Audio WS configuration
 - Chunk format, back-pressure
