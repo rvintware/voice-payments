@@ -4,10 +4,14 @@ import UnifiedDialog from './components/UnifiedDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
 import TransactionsFeed from './components/TransactionsFeed.jsx';
 import SplitLinksDialog from './components/SplitLinksDialog.jsx';
+import useConversationWS from './conversation/useConversationWS.js';
 
 export default function App() {
   const [dialogPayload, setDialogPayload] = useState(null); // holds data for unified dialog
   const [splitData, setSplitData] = useState(null); // { links, sentence }
+
+  // Initialise WebSocket for interruptions MVP (no UI impact)
+  useConversationWS();
 
   function handleCommand(kind, data) {
     if (kind === 'split') {

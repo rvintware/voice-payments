@@ -1,0 +1,194 @@
+# Feature: Interruptions  
+_
+Last updated: 2025-06-17_
+
+---
+
+## 1 Why this feature
+Speech feels natural only when you can cut in mid-sentence the same way you do with a human.  Today the app speaks a full response before letting the user talk again.  This doc proposes an **interruption-aware conversation layer** that preserves our strict payment safety rules while giving the interaction an OpenAI-voice-mode feel.
+
+Goals:
+* Barge-in latency ≤ 700 ms (p95)
+* Zero unconfirmed money moves
+* No raw-audio storage ➜ no extra regulatory burden
+
+---
+
+## 2 High-level flow 📊
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant Mic as Mic+VAD (browser)
+    participant FE as Front-end WebSocket
+    participant FSM as Conversation FSM (server)
+    participant ASR as OpenAI Audio WS
+    participant GPT as GPT func-call
+    participant API as Business routes
+    participant TTS as Alloy TTS (streaming)
+
+    U->>Mic: hold button + speak
+    Mic-->>FSM: audio chunks (WS)
+    ASR-->>FSM: partial / final transcript
+    FSM->>GPT: context + transcript
+    GPT-->>FSM: {function_call , risk}
+    alt risk == money
+        FSM->>FE: confirm_request("Send $20?")
+        U->>Mic: "Yes" / "No"
+        FSM->>API: create_payment ✔️
+    else safe intent
+        FSM->>API: query DB
+    end
+    API-->>FSM: data
+    FSM->>TTS: sentence
+    TTS-->>FE: audio chunks
+    FE-->>U: play audio
+    Note over FE,Mic: If VAD fires during playback → send vad_interrupt → FSM pauses TTS and restarts flow
+```
+
+---
+
+## 3 On-device vs Off-device split
+| Stage | Where | Why |
+|-------|-------|-----|
+| VAD (energy detect) | Browser | 10 ms cut-in; no secrets |
+| Mic capture & push-to-talk UI | Browser | UX & privacy |
+| Streaming ASR | OpenAI Audio WS | High accuracy, no GPU | 
+| Conversation FSM | Server | Single source of truth; holds short-term memory |
+| GPT tool-selection | Server | Function-calling with secret key |
+| TTS chunking | Server → Browser | Browser must be able to pause instantly |
+
+> Memory: only RAM for 30 min/25 turns in FSM; no long-term analytics table for now.
+
+---
+
+## 4 Risk taxonomy (strictness levels)
+| Risk | Examples | Confirmation | Schema rigour |
+|------|----------|--------------|---------------|
+| `safe` | "scroll", small-talk | none | lenient |
+| `info` | balance, timeline | none | normal |
+| `money` | create_payment, split_bill | **Yes/No** loop | strict enums & required |
+| `identity` | change e-mail (future) | 2-FA | strict + audit |
+
+Each GPT tool gains a `"risk": "money" \| "info"` field; FSM branches accordingly.
+
+---
+
+## 5 Finite-State Machine  🗺️
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Recording : MIC_PRESS
+    Recording --> Thinking : TRANSCRIPT_FINAL
+    Thinking --> Speaking : GPT_RESPONSE
+    Speaking --> Idle : AUDIO_END
+    Speaking --> Recording : USER_INTERRUPT
+    Thinking --> Recording : USER_INTERRUPT
+    Speaking --> ConfirmWait : risk==money
+    ConfirmWait --> Thinking : CONFIRM_YES
+    ConfirmWait --> Idle : CONFIRM_NO / TIMEOUT
+```
+
+Events emitted over WebSocket (`json`):
+* `vad_interrupt`  – client ➜ server
+* `pause_audio`     – server ➜ client
+* `tts_chunk`       – server ➜ client (stream)
+* `confirm_request` – server ➜ client
+
+---
+
+## 6 Tech additions
+1. **WebSocket layer** (`/ws/session/:id`) – `ws` or `socket.io`.
+2. **`AudioPlayer` utility (FE)** – id-based `play/pause`.
+3. **Browser VAD** – use `voice-activity-detection` npm; threshold tuned for 200 ms silence.
+4. **Server FSM module** (`backend/src/conversation/fsm.js`).
+5. **Risk tag in GPT schema** – update `interpret.js` tool catalogue.
+
+---
+
+## 7 Testing strategy
+* **Unit** – FSM transition table (XState Test) ensures money intents always hit `ConfirmWait`.
+* **Integration** – mock WS, assert `pause_audio` emitted ≤ 150 ms after `vad_interrupt`.
+* **E2E** – Playwright: send "Send $20", interrupt, issue new split-bill command, confirm.
+* **Perf** – capture p95 barge-in latency < 700 ms.
+
+---
+
+## 8 MVP timeline
+1. WS scaffolding & VAD (1 w)  
+2. Streaming ASR hookup (1 w)  
+3. FSM core + FE mirroring (1.5 w)  
+4. Risk tagging + confirm dialog reuse (1 w)  
+5. Tests & tuning (1 w)  
+**Total ≈ 5.5 weeks**
+
+---
+
+## 9 Open items
+* Exact OpenAI Audio model name & pricing.  
+* IAM/WebSocket auth in prod (JWT vs cookie).  
+* Accessibility: keyboard shortcut for mic during long responses.
+
+---
+
+## 10 Glossary & Implementation Notes
+
+### 10.1 Finite-State Machine (FSM)
+*A Finite-State Machine is a deterministic graph where the conversation can be in **one** state at a time and only certain events can move it to another.*  
+Why we use it here:
+1. Guarantees that a money-movement intent **cannot** execute unless the flow first passes through `ConfirmWait` ➜ airtight compliance.  
+2. Makes interruption handling trivial—`USER_INTERRUPT` is just another event that the graph already knows how to process.  
+3. Easy to unit-test: feed an event sequence, assert end-state.
+
+### 10.2 Session ID origin
+MVP: generated by Express session middleware (`express-session`) and set as an **HTTP-only cookie**.  
+Same cookie is reused for the WebSocket upgrade so server can map WS → session.
+
+### 10.3 WebSocket message contracts
+```ts
+type VadInterrupt  = { type:'vad_interrupt';  session:string };
+type PauseAudio    = { type:'pause_audio';    id:string };
+type TtsChunk      = { type:'tts_chunk';      id:string; index:number; url:string };
+type ConfirmReq    = { type:'confirm_request';id:string; sentence:string };
+type TranscriptFinal = { type:'transcript_final'; text:string; is_final:true };
+```
+
+### 10.4 Audio upload
+* 16-kHz mono PCM (little-endian) 320-ms chunks
+* `content-type: audio/linear16`
+
+### 10.5 Environment variables
+```
+# .env.example additions
+INTERRUPTIONS_MVP=true
+OPENAI_AUDIO_MODEL=whisper-large-v3
+WS_HEARTBEAT_MS=30000
+```
+
+### 10.6 Vite dev proxy for WS
+```js
+// vite.config.js
+server: {
+  proxy: {
+    '/ws': {
+      target: 'ws://localhost:4000',
+      ws: true
+    }
+  }
+}
+```
+
+### 10.7 Auth & multi-tab policy
+* Cookie-based session ID shared across tabs.  
+* `pause_audio` is broadcast **to all** sockets for that session so every tab pauses playback.
+
+### 10.8 Timeouts & failure rules
+* Confirmation timeout: 8 s of silence → FSM aborts money intent.
+* Max 3 consecutive `vad_interrupt` events on same turn before hard reset to `Idle`.
+
+### 10.9 Testing harness locations
+* `tests/mocks/openaiAudioMock.js` – fake Audio WS.  
+* `npm run e2e:ci` – Playwright script exercising interruption scenario.
+
+---
+
+With this design the app stays PCI-safe while delivering a modern, fluid voice UX where the user can pivot mid-sentence without ever losing accuracy or control. 

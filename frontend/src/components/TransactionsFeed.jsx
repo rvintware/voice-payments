@@ -35,7 +35,7 @@ export default function TransactionsFeed() {
       <h2 className="text-xl font-semibold mb-4">Transaction History</h2>
       <ul className="relative border-l-2 border-gray-100">
         {transactions.map(tx => (
-          <li key={tx.id} className="pl-4 mb-6 animate-slide-up-fade">
+          <li key={`${tx.id}-${tx.created_at}`} className="pl-4 mb-6 animate-slide-up-fade">
             <span className="absolute -left-1.5 top-2 h-3 w-3 rounded-full bg-blue-500" />
             <div className="flex justify-between items-start gap-4">
               <div>
