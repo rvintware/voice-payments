@@ -4,6 +4,7 @@ import { useBalance } from '../context/BalanceContext.jsx';
 import playSentence from '../utils/playAudio.js';
 import { pauseAll } from '../audio/AudioPlayer.js';
 import { getSocket } from '../conversation/socketSingleton.js';
+import useMicStream from '../audio/useMicStream.js';
 
 export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
   const { availableCents, pendingCents } = useBalance();
@@ -11,8 +12,22 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const startTimeRef = useRef(0);
+  const streamingEnabled = import.meta.env.VITE_STREAMING_ASR === 'true';
+  const micStopRef = useMicStream(isRecording && streamingEnabled);
 
   async function startRecording() {
+    if (streamingEnabled) {
+      // Streaming path (AudioWorklet handles capture & WS)
+      pauseAll();
+      try {
+        getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
+      } catch (err) {
+        console.warn('WS not ready for vad_interrupt', err);
+      }
+      setIsRecording(true);
+      return; // MediaRecorder path skipped
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
@@ -25,18 +40,18 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
+      mediaRecorder.start();
+      startTimeRef.current = Date.now();
+      setIsRecording(true);
+
       if (import.meta.env.VITE_INTERRUPTIONS_MVP === 'true') {
         pauseAll();
         try {
-          getSocket().send(JSON.stringify({ type: 'vad_interrupt' }));
+          getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
         } catch (err) {
           console.warn('WS not ready for vad_interrupt', err);
         }
       }
-
-      mediaRecorder.start();
-      startTimeRef.current = Date.now();
-      setIsRecording(true);
     } catch (err) {
       console.error('Mic access error', err);
       alert('Microphone permission denied');
@@ -44,6 +59,13 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   }
 
   async function stopRecording() {
+    if (streamingEnabled) {
+      setIsRecording(false);
+      // Stop the worklet pipeline
+      micStopRef.current?.();
+      return;
+    }
+
     if (!mediaRecorderRef.current) return;
 
     const durationMs = Date.now() - startTimeRef.current;

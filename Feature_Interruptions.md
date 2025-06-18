@@ -331,6 +331,43 @@ Without the interruption message the backend would stay in **Speaking** (output-
 - Chunk format, back-pressure
 - Integration tests
 
+#### 11.5.1 Scope & key goals  
+*Replace the blob-upload flow with true *live* audio streaming so the FSM can react to the user mid-sentence (partial transcripts).*  
+Target p95 mic-open→partial-text latency ≤ **400 ms**.
+
+#### 11.5.2 Binary frame schema  
+For forward-compat the audio chunk is prefixed with a **12-byte header**:
+
+| Offset | Len | Field | Notes |
+|--------|-----|-------|-------|
+| 0      | 1   | version | `0x01` |
+| 1      | 1   | type    | `0x01 = audio_chunk` |
+| 2      | 2   | flags   | bit-mask ( MSB=last_chunk, 0x02=encr ) |
+| 4      | 4   | seq     | uint32, wraps every 13 h |
+| 8      | 4   | ts_ms   | client wall-clock ms modulo 2³² |
+| 12     | …   | PCM payload | 16-bit LE, 5 120 samples (320 ms) |
+
+Any future codec/version can bump `version` to `0x02` without breaking today's gateway.
+
+#### 11.5.3 Front-end implementation  
+| File | Change |
+|------|--------|
+| `audio/pcmWorklet.js` | Adds 12-byte header; still down-samples to 16 kHz. |
+| `audio/useMicStream.js` | Sends frames via `socket.send()` **unless** `socket.bufferedAmount > 256 KiB` → drops chunk (leaky-bucket). |
+| `components/VoiceButton.jsx` | Gates live pipeline behind `VITE_STREAMING_ASR=true`. |
+
+#### 11.5.4 Back-pressure rule  
+Browser drops entire 320-ms frames when WS backlog > **256 KiB**.  Metric `bandwidth_soft_drop` logged to console and (later) Prom-counter.  Keeps RAM flat & ensures control frames aren't delayed.
+
+#### 11.5.5 Path decision  
+Stay on the existing `/ws/session` socket. Control frames (`pause_audio`, `confirm_request`) are emitted via `safeSend()` *ahead* of audio frames so they never starve.  A future `/ws/audio` split remains possible—header and client code already support it.
+
+#### 11.5.6 Next steps  
+1. **Backend ASR Gateway** – `asrProxy.js` opens Whisper-v3 WS, relays binary frames, emits `transcript_partial` / `transcript_final`.  
+2. Update FSM to ingest partials.  
+3. Unit & integration tests (fake OpenAI WS).  
+4. Perf probe for 95th-percentile latency.
+
 ### 11.6 Milestone-04 — FSM Core & Risk Routing
 - xstate machine JSON
 - GPT tool `risk` tag addition

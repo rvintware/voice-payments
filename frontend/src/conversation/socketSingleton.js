@@ -11,6 +11,7 @@ export function getSocket() {
 
   socket.onopen = () => {
     console.log('[WS] open (singleton)');
+    socket.binaryType = 'arraybuffer';
     // Expose globally for DevTools tinkering once.
     window.ws = socket;
   };
@@ -21,6 +22,23 @@ export function getSocket() {
       console.log('[WS] in', msg);
     } catch {
       console.log('[WS] raw', e.data);
+    }
+  };
+
+  /**
+   * Safe send wrapper. Queues a message until the socket is open.
+   */
+  socket.safeSend = function safeSend(data) {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(data);
+    } else {
+      socket.addEventListener(
+        'open',
+        () => {
+          socket.send(data);
+        },
+        { once: true }
+      );
     }
   };
 
