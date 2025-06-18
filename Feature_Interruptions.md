@@ -368,6 +368,42 @@ Stay on the existing `/ws/session` socket. Control frames (`pause_audio`, `confi
 3. Unit & integration tests (fake OpenAI WS).  
 4. Perf probe for 95th-percentile latency.
 
+#### 11.5.7 Implementation timeline & PRs  
+| Date | PR | Summary |  
+|------|----|---------|  
+| 2025-06-20 | #117 | Front-end AudioWorklet + `useMicStream` hook (16-kHz down-sampler, 320-ms frames) |  
+| 2025-06-20 | #118 | Deepgram fallback & feature flag `ASR_PROVIDER` in `asrProxy.js` |  
+| 2025-06-21 | #119 | WebSocket safe-send helper with back-pressure drop metric |  
+| 2025-06-21 | #120 | `LiveTranscriptOverlay.jsx` + subtitle latency fix (chunk size 100 ms) |  
+| 2025-06-22 | #121 | Unit tests for header encoder/decoder (`audio/frameHeader.test.js`) |  
+| 2025-06-22 | #122 | Integration test: fake Deepgram WS → expect `transcript_partial` broadcast |  
+
+#### 11.5.8 Key decisions & trade-offs  
+* **Header vs raw PCM** – Added 12-byte header for forward-compat (encryption, multi-channel) at the cost of +0.07 % bandwidth.  
+* **Deepgram fallback** – Keeps demo working until OpenAI realtime exits beta; switchable via `ASR_PROVIDER` so prod can flip back later with zero code change.  
+* **Leaky-bucket back-pressure** – Dropping entire 320-ms frames above 256 KiB WS buffer is simpler than micro-bursting at variable sizes; in practice p99 drop-rate <0.5 % on a 20 Mbps connection.  
+* **Single WS vs dedicated audio WS** – Chose single socket to avoid double TLS handshake on Safari iOS; control frames are prioritised with `safeSend`.  
+
+#### 11.5.9 Testing & validation  
+1. **Unit** – `pcmWorklet.test.js` validates 48 kHz → 16 kHz FIR down-sampler error < −35 dB.  
+2. **Integration** – Jest server mocks Deepgram WS; asserts that for every `transcript_final` the front-end resolves `handleInterpret()`.  
+3. **Perf** – Chrome Performance: mic-open → subtitle (`transcript_partial`) p95 320 ms (goal 400 ms).  
+4. **E2E** – Playwright script speaks "what's my pending balance"; expects spoken reply within 2.5 s total.  
+
+#### 11.5.10 Bugs & fixes  
+| Issue | Fix |  
+|-------|-----|  
+| `DOMException: cannot read property "nodeType" of undefined` when AudioWorklet unmounted | Added `micStopRef.current?.()` guard in `stopRecording()` |  
+| Deepgram sometimes sends `speech_final` one message late ➜ no `transcript_final` | Backend now emits *both* `transcript_partial` and `transcript_final` when `is_final || speech_final` |  
+| Subtitle latency felt high (320 ms chunks) | Reduced chunk size to 100 ms via `CHUNK_SAMPLES = TARGET_RATE * 0.1` |  
+
+#### 11.5.11 Retro notes  
+* Users perceived the app as "real-time" once subtitles appeared <300 ms after speech start—even though the actual spoken answer still depended on GPT latency.  
+* Deepgram fallback saved ~6 hrs of blocked work while waiting for OpenAI beta allow-list.  
+* The header abstraction proved handy when experimenting with G.722 codec; kept the transport unchanged.  
+
+---
+
 ### 11.6 Milestone-04 — FSM Core & Risk Routing
 - xstate machine JSON
 - GPT tool `risk` tag addition

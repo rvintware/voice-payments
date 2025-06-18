@@ -7,7 +7,7 @@
 // WebSocket.
 
 const TARGET_RATE = 16000; // Hz
-const CHUNK_SAMPLES = TARGET_RATE * 0.32; // 5120 samples ≈ 320 ms
+const CHUNK_SAMPLES = TARGET_RATE * 0.1;  // 1600 samples ≈ 100 ms
 const CHUNK_BYTES   = CHUNK_SAMPLES * 2;  // int16 → 2 bytes
 const HEADER_BYTES  = 12; // version(1) + type(1) + flags(2) + seq(4) + ts_ms(4)
 

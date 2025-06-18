@@ -6,6 +6,7 @@ import TransactionsFeed from './components/TransactionsFeed.jsx';
 import SplitLinksDialog from './components/SplitLinksDialog.jsx';
 import useConversationWS from './conversation/useConversationWS.js';
 import useVAD from './conversation/useVAD.js';
+import LiveTranscriptOverlay from './components/LiveTranscriptOverlay.jsx';
 
 export default function App() {
   const [dialogPayload, setDialogPayload] = useState(null); // holds data for unified dialog
@@ -52,6 +53,8 @@ export default function App() {
           onClose={() => setSplitData(null)}
         />
       )}
+      {/* Live transcript overlay for streaming ASR */}
+      <LiveTranscriptOverlay />
     </main>
   );
 }

@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { ASRProxy } from './asrProxy.js';
 
 /**
  * Attaches a basic WebSocket server for the interruptions MVP. The socket
@@ -12,7 +13,19 @@ export function attachWS(httpServer) {
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'hello', ts: Date.now() }));
 
-    ws.on('message', (data) => {
+    // Attach per-socket ASR relay if flag enabled
+    const streamingEnabled = process.env.STREAMING_ASR === 'true';
+    let asr;
+    if (streamingEnabled) {
+      asr = new ASRProxy(ws);
+    }
+
+    ws.on('message', (data, isBinary) => {
+      if (isBinary || data instanceof Buffer) {
+        asr?.handleFrame(data);
+        return;
+      }
+
       try {
         const msg = JSON.parse(data);
         if (msg.type === 'ping') {
@@ -25,9 +38,13 @@ export function attachWS(httpServer) {
             }
           });
         }
-      } catch (err) {
-        // ignore malformed JSON for now
+      } catch {
+        // ignore malformed JSON/binary
       }
+    });
+
+    ws.on('close', () => {
+      asr?.close();
     });
   });
 

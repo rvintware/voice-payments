@@ -69,7 +69,9 @@ export default function useMicStream(active) {
         workletNode?.disconnect();
       } catch {}
       try {
-        audioContext?.close();
+        if (audioContext && audioContext.state !== 'closed') {
+          audioContext.close();
+        }
       } catch {}
     };
 

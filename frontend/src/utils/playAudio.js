@@ -1,22 +1,29 @@
 import { play as playAudioElem } from '../audio/AudioPlayer.js';
-const cache = new Map();
+
+// In–browser cache: text ↦ objectURL of full MP3 so repeat prompts are instant.
+const sentenceCache = new Map();
 
 export default async function playSentence(text) {
   if (!text) return;
 
-  // Return cached blob if exists
-  let blob = cache.get(text);
-  if (!blob) {
-    const res = await fetch('http://localhost:4000/api/tts/say', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    });
-    if (!res.ok) throw new Error('TTS request failed');
-    blob = await res.blob();
-    cache.set(text, blob);
+  // 1. Instant playback – if cached, reuse.
+  if (sentenceCache.has(text)) {
+    playAudioElem(Date.now().toString(), sentenceCache.get(text));
+    return;
   }
 
-  const url = URL.createObjectURL(blob);
-  playAudioElem(Date.now().toString(), url);
+  // 2. Stream via GET so the <audio> element starts as soon as headers arrive.
+  const streamUrl = `http://localhost:4000/api/tts/say?${new URLSearchParams({ text })}`;
+  playAudioElem(Date.now().toString(), streamUrl);
+
+  // 3. In the background download full file once then cache as blob for the future.
+  try {
+    const res = await fetch(streamUrl);
+    if (!res.ok) return; // ignore failures – user already heard the streamed audio
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    sentenceCache.set(text, objectUrl);
+  } catch {
+    // network error during background caching – no big deal.
+  }
 } 
