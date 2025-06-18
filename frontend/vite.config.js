@@ -11,6 +11,10 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/ws': {
+        target: 'ws://localhost:4000',
+        ws: true,
+      },
     },
   },
 }); 

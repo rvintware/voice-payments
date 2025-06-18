@@ -3,11 +3,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import stripeWebhookRouter from './routes/stripeWebhook.js';
 import { syncStripePayments } from './utils/stripeSync.js';
+import http from 'http';
 
 // Load env variables
 dotenv.config();
 
 const app = express();
+const httpServer = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
 // Middleware
@@ -55,7 +57,12 @@ if (process.env.NODE_ENV !== 'test') {
       // eslint-disable-next-line no-console
       console.error('Stripe back-fill failed', err);
     }
-    app.listen(PORT, () => {
+    if (process.env.INTERRUPTIONS_MVP === 'true') {
+      const { attachWS } = await import('./conversation/ws.js');
+      attachWS(httpServer);
+    }
+
+    httpServer.listen(PORT, () => {
       // eslint-disable-next-line no-console
       console.log(`Server listening at http://localhost:${PORT}`);
     });
