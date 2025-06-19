@@ -1,3 +1,103 @@
+Evolution of the “interruptions” feature  
+========================================
+
+Phase 0 – MVP (March)   
+--------------------------------  
+• Capture: long-press mic → **MediaRecorder** blob → POST `/voice-to-text` → Whisper STT.  
+• Bot reply: POST `/interpret` (GPT) → TTS → browser plays full MP3.  
+• Weakness: user couldn’t “barge in” once TTS started; had to wait for audio to finish.
+
+Phase 1 – Live-stream experiment (April)   
+-----------------------------------------  
+Goal: replicate a walkie-talkie feel—stop the bot mid-sentence the moment the user talks.
+
+Technical additions   
+1. **Browser VAD** (voice-activity-detection) ran permanently while audio played.  
+2. **AudioWorklet** down-sampled mic PCM → 100 ms binary frames.  
+3. **Bidirectional WebSocket**  
+   • browser → server: audio frames, `vad_interrupt` JSON.  
+   • server → browser: `pause_audio`, streaming TTS chunks, partial transcripts.  
+4. **Deepgram/OpenAI ASR proxy** on server to transcribe streaming audio.  
+5. FSM gained `TRANSCRIPT_PARTIAL`, `TRANSCRIPT_FINAL`, `CONFIRM_YES/NO` events.  
+
+Why it looked great on paper   
+• Latency ~ 80 ms; bot could pause almost instantly.  
+• Whisper bill shrank (no full-blob uploads).  
+
+Why it failed in practice   
+• **Edge cases:** VAD fired on background noise; partial transcripts missed proper nouns, so GPT mis-parsed “to Teja” as “to teacher”.  
+• **Flaky transport:**  
+  – Mobile radio and captive Wi-Fi portals drop WS frames silently.  
+  – Keep-alive pings needed to stop Heroku dynos closing idle sockets.  
+• **Concurrency:** audio frames competed with JSON messages; small packet bursts stalled the socket on slow 3G.  
+• **Complexity:** 12-byte binary header, backpressure, Worklet life-cycle bugs.  
+
+After three sprints the UX was still brittle (“yes/no” often lost).  
+Decision in retro: “ship something reliable first”.
+
+Phase 2 – Rollback to blob-only, keep the good bits (May)   
+----------------------------------------------------------  
+Kept  
+• Browser VAD for **detection only** (no more streaming audio).  
+• FSM with states Idle → Recording → Thinking → Speaking → ConfirmWait and the 8-s timeout.  
+• TTS streaming (server continues to send small chunks).  
+
+Removed  
+• AudioWorklet + binary PCM framing.  
+• Deepgram SDK & `asrProxy.js`.  
+• `TRANSCRIPT_PARTIAL`, `TRANSCRIPT_FINAL`, `CONFIRM_YES/NO` events.  
+• Client-→server WS leg (`vad_interrupt` now sent via POST).  
+
+Why bidirectional WS became overkill  
+• 95 % of socket bandwidth had been the audio frames; once that vanished the only remaining **client→server** payload was `{type:"vad_interrupt"}`—about 40 bytes.  
+• Vercel Functions (our target host) do not accept incoming WS connections; we would have needed a self-hosted service anyway.  
+• A simple HTTPS POST is:  
+  – automatically retried by the browser;  
+  – easier to secure (same CSRF/CORS story as other routes);  
+  – not blocked by corporate proxies that disallow WS upgrades.  
+
+Reliability delta observed in QA  
+| Metric                          | Bi-directional WS | Blob + POST | Notes                                               |
+|---------------------------------|-------------------|-------------|-----------------------------------------------------|
+| Confirm dialog appears          | 70-95 %           | 100 %       | WS lost packets on mobile hand-offs.                |
+| TTS paused within 150 ms        | 80 %              | 95 %        | SSE/WS-outbound pause message travels once.         |
+| “Yes/No” recognised             | 88 %              | 96 %        | Whisper on whole blob more accurate than stream.    |
+| Dev hrs per week on infra bugs  | ~12 h             | <2 h        | No Worklet, no backpressure, no ping timers.        |
+
+Current architecture (June)   
+-----------------------------  
+Browser → Server  
+• Full-sentence blob POST `/voice-to-text`  
+• Tiny POST `/vad-interrupt` (when VAD fires)  
+• Short blob POST `/voice-confirm` (yes/no)
+
+Server → Browser  
+• Push `pause_audio`, `confirm_request`, `speak_sentence` over outbound WS **or** SSE (your choice).  
+
+What we gained  
+• All transports are plain HTTPS—Vercel-friendly, proxy-friendly.  
+• FSM remains interruption-aware; UX still pauses instantly.  
+• Codebase lost ~1,200 LOC of audio streaming glue.  
+• Unit tests now cover FSM timeouts and barge-ins deterministically.  
+
+What we lost (temporarily)  
+• Live captions overlay.  
+• Partial-transcript progress bar.  
+Both can return later if we ever add a dedicated streaming ASR service that meets accuracy goals.
+
+Key take-aways  
+--------------  
+1. **YAGNI for networking:** full-duplex WS is brilliant for constant high-rate data, but use the simplest thing for low-volume control signals.  
+2. **Quality beats novelty:** Whisper on blobs + GPT yielded more accurate intent extraction than the real-time ASR combo.  
+3. **FSM decoupling paid off:** we swapped the transport layer without touching state transition tests.  
+4. **Deploy target matters:** choosing Vercel nudged us toward stateless HTTP, saving ops work.
+
+Future-proofing   
+• If live captions come back, we can spin up a *separate* WS endpoint strictly for captions while keeping core money-moving flows on robust blob requests.  
+• If we decide to self-host later, nothing stops us from enabling full WS again—the FSM and VAD logic are still transport-agnostic.
+
+That’s the full arc: “walkie-talkie” ambition → real-time complexity → pragmatic rollback → lean, reliable, deploy-anywhere interruptions.
+
 # Feature: Interruptions  
 _
 Last updated: 2025-06-17_
