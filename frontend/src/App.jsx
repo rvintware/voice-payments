@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import VoiceButton from './components/VoiceButton.jsx';
 import UnifiedDialog from './components/UnifiedDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
@@ -6,6 +6,7 @@ import TransactionsFeed from './components/TransactionsFeed.jsx';
 import SplitLinksDialog from './components/SplitLinksDialog.jsx';
 import useConversationWS from './conversation/useConversationWS.js';
 import useVAD from './conversation/useVAD.js';
+import LiveTranscriptOverlay from './components/LiveTranscriptOverlay.jsx';
 
 export default function App() {
   const [dialogPayload, setDialogPayload] = useState(null); // holds data for unified dialog
@@ -15,6 +16,16 @@ export default function App() {
   useConversationWS();
   // Initialise VAD for barge-in
   useVAD();
+
+  // Listen for confirm_request events from FSM (via WS)
+  useEffect(() => {
+    function handler(e) {
+      const { sentence } = e.detail || {};
+      if (sentence) setDialogPayload({ sentence });
+    }
+    window.addEventListener('confirm_request', handler);
+    return () => window.removeEventListener('confirm_request', handler);
+  }, []);
 
   function handleCommand(kind, data) {
     if (kind === 'split') {
@@ -52,6 +63,8 @@ export default function App() {
           onClose={() => setSplitData(null)}
         />
       )}
+      {/* Live transcript overlay for streaming ASR */}
+      <LiveTranscriptOverlay />
     </main>
   );
 }

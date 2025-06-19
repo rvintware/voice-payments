@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { parseYesNo } from '../utils/parser.js';
-import Stripe from 'stripe';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,41 +27,37 @@ router.post('/voice-confirm', upload.single('audio'), async (req, res) => {
     fs.unlinkSync(tempPath);
 
     const decision = parseYesNo(transcription.text || '');
+
+    // Bail out if unsure what was said
     if (!decision) {
       return res.json({ retry: true });
     }
-    if (decision === 'no') {
-      return res.json({ cancelled: true });
+
+    // If affirmative, create the Stripe Checkout session immediately so the
+    // browser gets the URL in one round-trip (no extra WS hop).
+    if (decision === 'yes') {
+      const amountCents = Number(req.body?.amountCents);
+      const recipientEmail = req.body?.recipientEmail;
+
+      if (!amountCents || !recipientEmail) {
+        return res.status(400).json({ error: 'missing_payment_context' });
+      }
+
+      // Re-use the existing internal route – avoids duplicating Stripe code.
+      const createRes = await fetch('http://localhost:4000/api/create-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountCents, recipientEmail })
+      });
+      const json = await createRes.json();
+      if (!createRes.ok) {
+        return res.status(500).json({ error: 'payment_failed' });
+      }
+      return res.json({ decision: 'yes', url: json.url });
     }
 
-    // yes path – delegate to existing createPayment router logic
-    // assume body carries amountCents and email from query params
-    const { amountCents, recipientEmail } = req.body || {};
-    if (!amountCents || !recipientEmail) {
-      return res.status(400).json({ error: 'amountCents and recipientEmail required' });
-    }
-
-    // Use stripe instance directly (import stripe from createPayment?)
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-08-16' });
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer_email: recipientEmail,
-      line_items: [
-        {
-          price_data: {
-            currency: 'cad',
-            product_data: { name: `Payment to ${recipientEmail}` },
-            unit_amount: Number(amountCents),
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: 'https://example.com/success',
-      cancel_url: 'https://example.com/cancel',
-    });
-
-    res.json({ url: session.url });
+    // Negative answer – just echo it.
+    return res.json({ decision: 'no' });
   } catch (err) {
     console.error('Voice confirm error', err);
     res.status(500).json({ error: 'Failed to process confirmation' });

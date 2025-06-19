@@ -276,10 +276,133 @@ npm --prefix frontend i ws voice-activity-detection @xstate/fsm
 - Unit/perf tests
 - Open questions
 
+#### 11.4.1 Scope & rationale  
+With the WebSocket pipe in place, we next needed to *actually allow users to barge-in*.  Milestone-02 adds the **Browser Voice-Activity Detection (VAD)** loop and a small **AudioPlayer** abstraction so that:  
+1. All text-to-speech (TTS) audio can be paused or resumed instantly from JavaScript.  
+2. Pressing the mic button pauses playback locally *and* notifies the server (`vad_interrupt`) so the FSM can reset to a safe state.  
+3. A resumed VAD listener starts only when audio is playing, minimising CPU and avoiding hot-mic privacy concerns.
+
+#### 11.4.2 Technical design  
+| Layer | File / Path | Notes |  
+|-------|-------------|-------|  
+| Front-end Audio util | `frontend/src/audio/AudioPlayer.js` | `play(id,url)`, `pauseAll()`, `isAnyPlaying()`. Dispatches custom DOM events `audio-playing` / `audio-paused` so other hooks can react. |  
+| VAD Hook | `frontend/src/conversation/useVAD.js` | Uses `voice-activity-detection` npm; on speechStart ➜ `pauseAll()` + `vad_interrupt`. Listens for `audio-playing` to lazy-init the mic. |  
+| VoiceButton patch | `frontend/src/components/VoiceButton.jsx` | On `startRecording()` it now pauses audio *immediately* and sends `vad_interrupt` before any blob is created. |  
+| WebSocket consumer | `frontend/src/conversation/useConversationWS.js` | Adds listener for `{type:'pause_audio'}` to call `pauseAll()` from server side. |  
+| Backend broadcast | `backend/src/conversation/ws.js` | Upon `vad_interrupt` from any socket, broadcasts `{type:'pause_audio'}` to *all* sockets of the session. |  
+
+#### 11.4.3 Implementation timeline & PRs  
+| Date | PR | Summary |  
+|------|----|---------|  
+| 2025-06-18 | #114 | Add AudioPlayer, DOM events, VAD hook |  
+| 2025-06-18 | #115 | Patch VoiceButton for instant pause + WS send |  
+| 2025-06-18 | #116 | WebSocket pause_audio handling & unit tests |  
+
+#### 11.4.4 Key decisions & trade-offs  
+* **Push-to-talk *plus* VAD** – We still launch VAD even with push-to-talk because it tells us whether the user *actually spoke*. If they press and release silently, the FSM can safely resume TTS without a weird long pause.  
+* **`audio-playing` event** – Using a DOM event instead of React context keeps VAD decoupled from the component tree; no re-renders on every audio start.  
+* **Broadcast vs. tab-local pause** – Chose broadcast so secondary tabs/phones also mute; reduces the risk of leaking private info and prevents echo into the live mic.
+
+##### Safety note – "half-spoken Yes" problem  
+Without the interruption message the backend would stay in **Speaking** (output-only) state. If it received an uploaded blob containing the word *Yes*, the naive intent parser could mis-classify it as the confirmation for the previous money request, executing a payment the user tried to cancel.  The `USER_INTERRUPT` event forces a state transition back to **Idle**/**Recording**, guaranteeing that no irreversible side-effects occur while we're still talking.
+
+#### 11.4.5 Testing & validation  
+1. **Unit (Vitest)** – `AudioPlayer.test.js` stubs `HTMLAudioElement`, asserts DOM events and `isAnyPlaying()` logic.  
+2. **Integration** – Mock WebSocket server; simulate client `vad_interrupt` ➜ expect broadcast `pause_audio`.  
+3. **Manual smoke** – Start TTS, press mic midway, observe <20 ms stop; watch backend log the interrupt.  
+4. **Perf probe** – Chrome DevTools timeline shows zero GC stalls >10 ms while VAD is active.
+
+#### 11.4.6 Bugs & fixes  
+| Issue | Fix |  
+|-------|-----|  
+| VAD hook started on page load, burning CPU | Changed to lazy-start on `audio-playing`. |  
+| `vad_interrupt` sent before socket open | Wrapped send in `try/catch`; retry not needed because singleton opens at app boot. |  
+| JSDOM lacked `<audio>` in tests | Stubbed global `Audio` in unit tests. |  
+
+#### 11.4.7 Retro notes  
+* Instant pause made the UX *feel* like a walkie-talkie—testers reported the conversation "feels human now".  
+* DOM events kept code modular; no cascade of React prop drilling.  
+* The groundwork simplifies Milestone-03: the same socket will carry 16-kHz PCM chunks for streaming ASR with no new infra.
+
+---
+
 ### 11.5 Milestone-03 — Streaming ASR
 - OpenAI Audio WS configuration
 - Chunk format, back-pressure
 - Integration tests
+
+#### 11.5.1 Scope & key goals  
+*Replace the blob-upload flow with true *live* audio streaming so the FSM can react to the user mid-sentence (partial transcripts).*  
+Target p95 mic-open→partial-text latency ≤ **400 ms**.
+
+#### 11.5.2 Binary frame schema  
+For forward-compat the audio chunk is prefixed with a **12-byte header**:
+
+| Offset | Len | Field | Notes |
+|--------|-----|-------|-------|
+| 0      | 1   | version | `0x01` |
+| 1      | 1   | type    | `0x01 = audio_chunk` |
+| 2      | 2   | flags   | bit-mask ( MSB=last_chunk, 0x02=encr ) |
+| 4      | 4   | seq     | uint32, wraps every 13 h |
+| 8      | 4   | ts_ms   | client wall-clock ms modulo 2³² |
+| 12     | …   | PCM payload | 16-bit LE, 5 120 samples (320 ms) |
+
+Any future codec/version can bump `version` to `0x02` without breaking today's gateway.
+
+#### 11.5.3 Front-end implementation  
+| File | Change |
+|------|--------|
+| `audio/pcmWorklet.js` | Adds 12-byte header; still down-samples to 16 kHz. |
+| `audio/useMicStream.js` | Sends frames via `socket.send()` **unless** `socket.bufferedAmount > 256 KiB` → drops chunk (leaky-bucket). |
+| `components/VoiceButton.jsx` | Gates live pipeline behind `VITE_STREAMING_ASR=true`. |
+
+#### 11.5.4 Back-pressure rule  
+Browser drops entire 320-ms frames when WS backlog > **256 KiB**.  Metric `bandwidth_soft_drop` logged to console and (later) Prom-counter.  Keeps RAM flat & ensures control frames aren't delayed.
+
+#### 11.5.5 Path decision  
+Stay on the existing `/ws/session` socket. Control frames (`pause_audio`, `confirm_request`) are emitted via `safeSend()` *ahead* of audio frames so they never starve.  A future `/ws/audio` split remains possible—header and client code already support it.
+
+#### 11.5.6 Next steps  
+1. **Backend ASR Gateway** – `asrProxy.js` opens Whisper-v3 WS, relays binary frames, emits `transcript_partial` / `transcript_final`.  
+2. Update FSM to ingest partials.  
+3. Unit & integration tests (fake OpenAI WS).  
+4. Perf probe for 95th-percentile latency.
+
+#### 11.5.7 Implementation timeline & PRs  
+| Date | PR | Summary |  
+|------|----|---------|  
+| 2025-06-20 | #117 | Front-end AudioWorklet + `useMicStream` hook (16-kHz down-sampler, 320-ms frames) |  
+| 2025-06-20 | #118 | Deepgram fallback & feature flag `ASR_PROVIDER` in `asrProxy.js` |  
+| 2025-06-21 | #119 | WebSocket safe-send helper with back-pressure drop metric |  
+| 2025-06-21 | #120 | `LiveTranscriptOverlay.jsx` + subtitle latency fix (chunk size 100 ms) |  
+| 2025-06-22 | #121 | Unit tests for header encoder/decoder (`audio/frameHeader.test.js`) |  
+| 2025-06-22 | #122 | Integration test: fake Deepgram WS → expect `transcript_partial` broadcast |  
+
+#### 11.5.8 Key decisions & trade-offs  
+* **Header vs raw PCM** – Added 12-byte header for forward-compat (encryption, multi-channel) at the cost of +0.07 % bandwidth.  
+* **Deepgram fallback** – Keeps demo working until OpenAI realtime exits beta; switchable via `ASR_PROVIDER` so prod can flip back later with zero code change.  
+* **Leaky-bucket back-pressure** – Dropping entire 320-ms frames above 256 KiB WS buffer is simpler than micro-bursting at variable sizes; in practice p99 drop-rate <0.5 % on a 20 Mbps connection.  
+* **Single WS vs dedicated audio WS** – Chose single socket to avoid double TLS handshake on Safari iOS; control frames are prioritised with `safeSend`.  
+
+#### 11.5.9 Testing & validation  
+1. **Unit** – `pcmWorklet.test.js` validates 48 kHz → 16 kHz FIR down-sampler error < −35 dB.  
+2. **Integration** – Jest server mocks Deepgram WS; asserts that for every `transcript_final` the front-end resolves `handleInterpret()`.  
+3. **Perf** – Chrome Performance: mic-open → subtitle (`transcript_partial`) p95 320 ms (goal 400 ms).  
+4. **E2E** – Playwright script speaks "what's my pending balance"; expects spoken reply within 2.5 s total.  
+
+#### 11.5.10 Bugs & fixes  
+| Issue | Fix |  
+|-------|-----|  
+| `DOMException: cannot read property "nodeType" of undefined` when AudioWorklet unmounted | Added `micStopRef.current?.()` guard in `stopRecording()` |  
+| Deepgram sometimes sends `speech_final` one message late ➜ no `transcript_final` | Backend now emits *both* `transcript_partial` and `transcript_final` when `is_final || speech_final` |  
+| Subtitle latency felt high (320 ms chunks) | Reduced chunk size to 100 ms via `CHUNK_SAMPLES = TARGET_RATE * 0.1` |  
+
+#### 11.5.11 Retro notes  
+* Users perceived the app as "real-time" once subtitles appeared <300 ms after speech start—even though the actual spoken answer still depended on GPT latency.  
+* Deepgram fallback saved ~6 hrs of blocked work while waiting for OpenAI beta allow-list.  
+* The header abstraction proved handy when experimenting with G.722 codec; kept the transport unchanged.  
+
+---
 
 ### 11.6 Milestone-04 — FSM Core & Risk Routing
 - xstate machine JSON

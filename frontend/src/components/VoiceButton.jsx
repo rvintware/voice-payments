@@ -1,9 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FaMicrophone } from 'react-icons/fa';
 import { useBalance } from '../context/BalanceContext.jsx';
 import playSentence from '../utils/playAudio.js';
 import { pauseAll } from '../audio/AudioPlayer.js';
 import { getSocket } from '../conversation/socketSingleton.js';
+
+// Grace period (ms) after we receive an ASR "final" before stopping capture.
+// For answer-mode confirmations we allow a much quicker press.
+const GRACE_MS = 800; // long utterances (command mode)
 
 export default function VoiceButton({ mode = 'command', onPaymentLink, answerPayload = {}, onCancel }) {
   const { availableCents, pendingCents } = useBalance();
@@ -11,8 +15,62 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const startTimeRef = useRef(0);
+  // Streaming ASR disabled – always use blob upload path
+  const streamingEnabled = false;
+  const micStopRef = { current: null };
+  const wsHandlerRef = useRef(null);
+  const finalTimerRef = useRef(null);
 
   async function startRecording() {
+    if (streamingEnabled) {
+      // Streaming path (AudioWorklet handles capture & WS)
+      pauseAll();
+      try {
+        getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
+      } catch (err) {
+        console.warn('WS not ready for vad_interrupt', err);
+      }
+      setIsRecording(true);
+
+      // Attach listener for transcript_final events
+      const ws = getSocket();
+      wsHandlerRef.current = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'transcript_partial' && finalTimerRef.current) {
+            // User kept speaking – cancel pending stop
+            clearTimeout(finalTimerRef.current);
+            finalTimerRef.current = null;
+          }
+
+          if (msg.type === 'transcript_final') {
+            console.log('[VoiceButton] final text →', msg.text);
+
+            // Schedule graceful stop after GRACE_MS so we don't cut off speech
+            // if the user pauses briefly (e.g., between the amount and the
+            // recipient's name).
+            if (finalTimerRef.current) clearTimeout(finalTimerRef.current);
+            finalTimerRef.current = setTimeout(() => {
+              micStopRef.current?.();
+              setIsRecording(false);
+
+              // Detach WS listener when turn is definitely over
+              if (wsHandlerRef.current) {
+                ws.removeEventListener('message', wsHandlerRef.current);
+                wsHandlerRef.current = null;
+              }
+            }, GRACE_MS);
+
+            // Process the text immediately – FSM can think while we still
+            // capture tail-speech.
+            handleInterpret(msg.text);
+          }
+        } catch {}
+      };
+      ws.addEventListener('message', wsHandlerRef.current);
+      return; // MediaRecorder path skipped
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
@@ -25,18 +83,18 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
+      mediaRecorder.start();
+      startTimeRef.current = Date.now();
+      setIsRecording(true);
+
       if (import.meta.env.VITE_INTERRUPTIONS_MVP === 'true') {
         pauseAll();
         try {
-          getSocket().send(JSON.stringify({ type: 'vad_interrupt' }));
+          getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
         } catch (err) {
           console.warn('WS not ready for vad_interrupt', err);
         }
       }
-
-      mediaRecorder.start();
-      startTimeRef.current = Date.now();
-      setIsRecording(true);
     } catch (err) {
       console.error('Mic access error', err);
       alert('Microphone permission denied');
@@ -44,10 +102,24 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   }
 
   async function stopRecording() {
+    if (streamingEnabled) {
+      setIsRecording(false);
+      // Stop the worklet pipeline
+      micStopRef.current?.();
+
+      // Detach WS handler if still active
+      if (wsHandlerRef.current) {
+        getSocket().removeEventListener('message', wsHandlerRef.current);
+        wsHandlerRef.current = null;
+      }
+      return;
+    }
+
     if (!mediaRecorderRef.current) return;
 
     const durationMs = Date.now() - startTimeRef.current;
-    if (durationMs < 400) {
+    // For command mode enforce GRACE_MS so very short presses are ignored.
+    if (mode === 'command' && durationMs < GRACE_MS) {
       mediaRecorderRef.current.stop();
       alert('Hold the button a bit longer to record');
       setIsRecording(false);
@@ -102,15 +174,7 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
 
             const dollars = (cents / 100).toFixed(2);
             try {
-              const ttsRes = await fetch('http://localhost:4000/api/tts/say', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: `Your ${type} balance is ${dollars} Canadian dollars` }),
-              });
-              const blob = await ttsRes.blob();
-              const url = URL.createObjectURL(blob);
-              const { play } = await import('../audio/AudioPlayer.js');
-              play(Date.now().toString(), url);
+              await playSentence(`Your ${type} balance is ${dollars} Canadian dollars`);
               return; // Do not proceed to payment flow
             } catch (err) {
               alert('Could not speak balance');
@@ -159,18 +223,19 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             body: formData,
           });
           const data = await res.json();
-          if (data.url) {
-            const linkObj = {
-              name: answerPayload.recipientEmail?.split('@')[0] || 'Friend',
-              amount_cents: answerPayload.amountCents,
-              currency: 'usd',
-              url: data.url,
-            };
-            onPaymentLink?.(linkObj);
-          } else if (data.cancelled) {
-            alert('Payment cancelled');
-            onCancel?.();
-          } else if (data.retry) {
+
+          if (data.decision === 'yes') {
+            if (data.url) {
+              try {
+                await navigator.clipboard.writeText(data.url);
+              } catch {/* clipboard may fail silently */}
+              await playSentence('Payment confirmed. I have copied the link to your clipboard.');
+            } else {
+              await playSentence('Payment confirmed.');
+            }
+          } else if (data.decision === 'no') {
+            await playSentence('Okay, I cancelled the payment.');
+          } else {
             alert('I did not catch that, please try again');
           }
         } catch (err) {
@@ -179,6 +244,76 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
       }
     };
   }
+
+  async function handleInterpret(transcriptText) {
+    try {
+      const interpRes = await fetch('http://localhost:4000/api/interpret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: transcriptText })
+      });
+      const interpData = await interpRes.json();
+      if (!interpRes.ok) {
+        alert(interpData.error || 'Could not understand command');
+        return;
+      }
+
+      // Balance intent needs local cents values
+      if (interpData.intent === 'query_balance') {
+        const type = interpData.type;
+        const cents =
+          type === 'pending'
+            ? pendingCents
+            : type === 'available'
+            ? availableCents
+            : (pendingCents ?? 0) + (availableCents ?? 0);
+
+        if (cents == null) {
+          alert('Balance is still loading, please try again');
+          return;
+        }
+
+        const dollars = (cents / 100).toFixed(2);
+        try {
+          await playSentence(`Your ${type} balance is ${dollars} Canadian dollars`);
+          return;
+        } catch {
+          alert('Could not speak balance');
+          return;
+        }
+      }
+
+      // Handle money-moving flows that need explicit confirmation
+      if (interpData.intent === 'confirm_request') {
+        // UnifiedDialog/useTTS will handle speaking the confirmation sentence.
+        onPaymentLink?.(null, { ...interpData, transcript: transcriptText });
+        return;
+      }
+
+      if (interpData.intent === 'speak' && interpData.sentence) {
+        try {
+          await playSentence(interpData.sentence);
+        } catch (err) {
+          console.error('TTS playback error', err);
+          alert('Could not play speech');
+        }
+        return;
+      }
+      // Additional intents (split_links, payment flows) can be wired later.
+    } catch (err) {
+      alert('Error contacting backend');
+    }
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (wsHandlerRef.current) {
+        getSocket().removeEventListener('message', wsHandlerRef.current);
+        wsHandlerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <button

@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { getFsm } from './fsm.js';
 
 /**
  * Attaches a basic WebSocket server for the interruptions MVP. The socket
@@ -12,23 +13,61 @@ export function attachWS(httpServer) {
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'hello', ts: Date.now() }));
 
-    ws.on('message', (data) => {
+    // For demo we derive sessionId from remoteAddress; a prod build would use a cookie or JWT
+    const sessionId = ws._socket.remoteAddress + ':' + (ws._socket.remotePort || '');
+
+    const fsm = getFsm(sessionId, async (eventType, payload) => {
+      // Simple emitter that serialises events onto this socket
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: eventType, ...payload }));
+      }
+
+      // Handle side-effects that require server resources
+      if (eventType === 'payment_confirmed') {
+        try {
+          // payload should carry amountCents & recipientEmail stored earlier in context – placeholder for now
+          const resp = await fetch('http://localhost:4000/api/create-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amountCents: fsm.context?.amountCents, recipientEmail: fsm.context?.recipientEmail })
+          });
+          const json = await resp.json();
+          const sentence = 'Payment link generated. I have copied it to your clipboard.';
+          // send back sentence to client to speak
+          ws.send(JSON.stringify({ type: 'speak_sentence', sentence, url: json.url }));
+        } catch (err) {
+          console.error('payment route error', err);
+          ws.send(JSON.stringify({ type: 'error', error: 'payment_failed' }));
+        }
+      }
+    });
+
+    // No ASRProxy required.
+    let asr = null;
+
+    ws.on('message', (data, isBinary) => {
+      // We no longer expect binary audio frames. Ignore if received.
+      if (isBinary || data instanceof Buffer) return;
+
       try {
         const msg = JSON.parse(data);
         if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
         } else if (msg.type === 'vad_interrupt') {
-          // Broadcast pause_audio to all sockets on this server
+          // USER_INTERRUPT event to FSM and broadcast pause_audio immediately
+          fsm.send('USER_INTERRUPT');
           wss.clients.forEach((client) => {
             if (client.readyState === 1) {
               client.send(JSON.stringify({ type: 'pause_audio' }));
             }
           });
         }
-      } catch (err) {
-        // ignore malformed JSON for now
+      } catch {
+        // ignore malformed JSON/binary
       }
     });
+
+    ws.on('close', () => {});
   });
 
   // eslint-disable-next-line no-console
