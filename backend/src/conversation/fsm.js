@@ -7,8 +7,8 @@
 //                      ⬑           ↘ USER_INTERRUPT
 //              ConfirmWait ←─ Speaking (risk:money)
 //
-// Events handled: USER_INTERRUPT, TRANSCRIPT_FINAL, GPT_RESULT,
-// CONFIRM_YES, CONFIRM_NO, TTS_END.
+// Events handled: MIC_PRESS, USER_INTERRUPT, RECORD_END, GPT_RESULT,
+// TTS_END, CONFIRM_TIMEOUT.
 //
 // The FSM is intentionally side-effect-free; callers supply callbacks
 // (onTransition, emitWs) so that unit tests remain deterministic.
@@ -18,6 +18,7 @@ export class ConversationFSM {
     this.state = 'Idle';
     this.context = {};
     this.emit = emit; // function(type,payload)
+    this._timeout = null;
   }
 
   send(event) {
@@ -29,7 +30,8 @@ export class ConversationFSM {
         }
         break;
       case 'Recording':
-        if (type === 'TRANSCRIPT_FINAL') {
+        if (type === 'RECORD_END') {
+          // Browser finished uploading blob and we have the transcript in payload
           this.context.transcript = event.text;
           this._transition('Thinking');
         } else if (type === 'USER_INTERRUPT') {
@@ -43,6 +45,8 @@ export class ConversationFSM {
             this.context.pendingSentence = sentence;
             this._transition('ConfirmWait');
             this.emit('confirm_request', { sentence });
+            // start 8-second confirmation timer
+            this._timeout = setTimeout(() => this.send('CONFIRM_TIMEOUT'), 8000);
           } else {
             this.context.sentence = sentence;
             this._transition('Speaking');
@@ -61,13 +65,12 @@ export class ConversationFSM {
         }
         break;
       case 'ConfirmWait':
-        if (type === 'CONFIRM_YES') {
-          this.emit('payment_confirmed');
-          this._transition('Thinking'); // GPT will create payment → sentence
-        } else if (type === 'CONFIRM_NO' || type === 'CONFIRM_TIMEOUT') {
+        if (type === 'CONFIRM_TIMEOUT') {
           this.emit('confirm_cancelled');
+          this._clearTimer();
           this._transition('Idle');
         } else if (type === 'USER_INTERRUPT') {
+          this._clearTimer();
           this._transition('Recording');
         }
         break;
@@ -77,9 +80,22 @@ export class ConversationFSM {
     }
   }
 
+  _clearTimer() {
+    if (this._timeout) {
+      clearTimeout(this._timeout);
+      this._timeout = null;
+    }
+  }
+
   _transition(next) {
+    // Clear any pending timer when leaving a state
+    if (this.state === 'ConfirmWait') this._clearTimer();
     this.state = next;
     this.emit('state_change', { state: next });
+  }
+
+  getState() {
+    return this.state;
   }
 }
 

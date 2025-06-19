@@ -15,62 +15,8 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const startTimeRef = useRef(0);
-  // Streaming ASR disabled – always use blob upload path
-  const streamingEnabled = false;
-  const micStopRef = { current: null };
-  const wsHandlerRef = useRef(null);
-  const finalTimerRef = useRef(null);
 
   async function startRecording() {
-    if (streamingEnabled) {
-      // Streaming path (AudioWorklet handles capture & WS)
-      pauseAll();
-      try {
-        getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
-      } catch (err) {
-        console.warn('WS not ready for vad_interrupt', err);
-      }
-      setIsRecording(true);
-
-      // Attach listener for transcript_final events
-      const ws = getSocket();
-      wsHandlerRef.current = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'transcript_partial' && finalTimerRef.current) {
-            // User kept speaking – cancel pending stop
-            clearTimeout(finalTimerRef.current);
-            finalTimerRef.current = null;
-          }
-
-          if (msg.type === 'transcript_final') {
-            console.log('[VoiceButton] final text →', msg.text);
-
-            // Schedule graceful stop after GRACE_MS so we don't cut off speech
-            // if the user pauses briefly (e.g., between the amount and the
-            // recipient's name).
-            if (finalTimerRef.current) clearTimeout(finalTimerRef.current);
-            finalTimerRef.current = setTimeout(() => {
-              micStopRef.current?.();
-              setIsRecording(false);
-
-              // Detach WS listener when turn is definitely over
-              if (wsHandlerRef.current) {
-                ws.removeEventListener('message', wsHandlerRef.current);
-                wsHandlerRef.current = null;
-              }
-            }, GRACE_MS);
-
-            // Process the text immediately – FSM can think while we still
-            // capture tail-speech.
-            handleInterpret(msg.text);
-          }
-        } catch {}
-      };
-      ws.addEventListener('message', wsHandlerRef.current);
-      return; // MediaRecorder path skipped
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
@@ -89,11 +35,7 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
 
       if (import.meta.env.VITE_INTERRUPTIONS_MVP === 'true') {
         pauseAll();
-        try {
-          getSocket().safeSend(JSON.stringify({ type: 'vad_interrupt' }));
-        } catch (err) {
-          console.warn('WS not ready for vad_interrupt', err);
-        }
+        fetch('http://localhost:4000/api/vad-interrupt', { method: 'POST' });
       }
     } catch (err) {
       console.error('Mic access error', err);
@@ -102,19 +44,6 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
   }
 
   async function stopRecording() {
-    if (streamingEnabled) {
-      setIsRecording(false);
-      // Stop the worklet pipeline
-      micStopRef.current?.();
-
-      // Detach WS handler if still active
-      if (wsHandlerRef.current) {
-        getSocket().removeEventListener('message', wsHandlerRef.current);
-        wsHandlerRef.current = null;
-      }
-      return;
-    }
-
     if (!mediaRecorderRef.current) return;
 
     const durationMs = Date.now() - startTimeRef.current;
@@ -305,15 +234,30 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
     }
   }
 
-  // Cleanup on unmount
+  // Allow holding the spacebar as a push-to-talk shortcut.
   useEffect(() => {
-    return () => {
-      if (wsHandlerRef.current) {
-        getSocket().removeEventListener('message', wsHandlerRef.current);
-        wsHandlerRef.current = null;
+    function keyHandler(e) {
+      if (e.code !== 'Space' || e.repeat || e.altKey || e.metaKey || e.ctrlKey) return;
+      // Ignore if user is typing in an input element
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.type === 'keydown') {
+        if (!isRecording) startRecording();
+      } else if (e.type === 'keyup') {
+        if (isRecording) stopRecording();
       }
+      e.preventDefault(); // stop page scroll
+    }
+
+    window.addEventListener('keydown', keyHandler);
+    window.addEventListener('keyup', keyHandler);
+    return () => {
+      window.removeEventListener('keydown', keyHandler);
+      window.removeEventListener('keyup', keyHandler);
     };
-  }, []);
+    // isRecording included so handler has current value
+  }, [isRecording]);
 
   return (
     <button
