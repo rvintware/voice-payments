@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { getSocket } from './socketSingleton.js';
 import { pauseAll } from '../audio/AudioPlayer.js';
+import playSentence from '../utils/playAudio.js';
 
 export default function useConversationWS() {
   const wsRef = useRef(null);
@@ -13,7 +14,13 @@ export default function useConversationWS() {
     const handleMsg = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'pause_audio') pauseAll();
+        if (msg.type === 'pause_audio') {
+          pauseAll();
+        } else if (msg.type === 'confirm_request') {
+          window.dispatchEvent(new CustomEvent('confirm_request', { detail: msg }));
+        } else if (msg.type === 'speak_sentence' && msg.sentence) {
+          playSentence(msg.sentence);
+        }
       } catch {
         /* ignore invalid json */
       }

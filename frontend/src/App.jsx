@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import VoiceButton from './components/VoiceButton.jsx';
 import UnifiedDialog from './components/UnifiedDialog.jsx';
 import BalanceBar from './components/BalanceBar.jsx';
@@ -16,6 +16,16 @@ export default function App() {
   useConversationWS();
   // Initialise VAD for barge-in
   useVAD();
+
+  // Listen for confirm_request events from FSM (via WS)
+  useEffect(() => {
+    function handler(e) {
+      const { sentence } = e.detail || {};
+      if (sentence) setDialogPayload({ sentence });
+    }
+    window.addEventListener('confirm_request', handler);
+    return () => window.removeEventListener('confirm_request', handler);
+  }, []);
 
   function handleCommand(kind, data) {
     if (kind === 'split') {
