@@ -39,14 +39,20 @@ export function extractAmountCents(transcript) {
 }
 
 export function extractName(transcript) {
-  const match = transcript.toLowerCase().match(/\bto\s+(\w+)/);
-  if (match) return match[1];
+  // 1) Try to capture the first word after "to" (e.g. "Send 25 dollars to Rehan").
+  const m1 = transcript.match(/\bto\s+([a-z]+)/i);
+  if (m1) return m1[1].toLowerCase();
+
+  // 2) Fallback: use the last standalone word in the sentence
+  //    Works for utterances like "Send twenty dollars Rehan" (missing "to").
+  const m2 = transcript.trim().match(/([a-z]+)[.!?]?$/i);
+  if (m2) return m2[1].toLowerCase();
   return null;
 }
 
 export function parseYesNo(transcript) {
   const text = transcript.trim().toLowerCase();
-  if (/^(yes|yeah|yep|sure|affirmative)\b/.test(text)) return 'yes';
-  if (/^(no|nope|nah|negative)\b/.test(text)) return 'no';
+  if (/\b(yes|yeah|yep|sure|affirmative)\b/.test(text)) return 'yes';
+  if (/\b(no|nope|nah|negative)\b/.test(text))   return 'no';
   return null;
 } 

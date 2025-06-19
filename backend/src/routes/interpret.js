@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { normalizeRecipient } from '../utils/email.js';
+import { extractName } from '../utils/parser.js';
 
 const router = Router();
 
@@ -15,13 +16,21 @@ router.post('/interpret', async (req, res) => {
       {
         role: 'system',
         content:
-          `You interpret user utterances for a voice banking app.
-           ALWAYS respond with a JSON function_call and NEVER plain text.
+          `You convert spoken banking commands into structured JSON.
+           ALWAYS reply with a JSON function_call – never plain text.
+
            • "send/pay/give X dollars to NAME" → create_payment { amount_cents, recipient_email }
            • "what's my pending/available/both balance" → query_balance { type }
            • "show my recent transactions" → query_recent_transactions { limit }
            • "split X dollars three ways with Alice and Bob" → split_bill { total_cents, currency, friends }
-           Recipient email: if user only says the name, lower-case it and append "@gmail.com".`,
+
+           When the user provides only a name (no email), build recipient_email by:
+              1. trimming spaces
+              2. converting to lowercase
+              3. removing non-alphanumeric chars
+              4. appending "@gmail.com".
+
+           NEVER invent placeholders like "example@gmail.com" – use the spoken name instead.`,
       },
       { role: 'user', content: transcript },
     ];
@@ -135,10 +144,25 @@ router.post('/interpret', async (req, res) => {
       let { amount_cents: amountCents, recipient_email: recipientEmail } = args;
       recipientEmail = normalizeRecipient(recipientEmail);
 
+      // Fallback: model sometimes returns placeholder email.
+      let displayName = null;
+      if (recipientEmail.startsWith('example@')) {
+        const guessedName = extractName(transcript);
+        if (guessedName) {
+          displayName = guessedName;
+          recipientEmail = normalizeRecipient(guessedName);
+        }
+      }
+
       if (!amountCents || !recipientEmail) {
         return res.status(422).json({ error: 'parse_incomplete', transcript });
       }
-      return res.json({ amountCents, recipientEmail });
+      // Money-moving intent – require confirmation in FSM layer
+      const dollars = (amountCents / 100).toFixed(2);
+      const rawName = displayName ?? recipientEmail.split('@')[0];
+      const prettyName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+      const sentence = `Send ${dollars} Canadian dollars to ${prettyName}. Should I proceed?`;
+      return res.json({ intent: 'confirm_request', sentence, amountCents, recipientEmail });
     } else if (fnCall.name === 'query_balance') {
       const args = JSON.parse(fnCall.arguments || '{}');
       const { type } = args;
