@@ -18,7 +18,7 @@ export default function useVAD() {
           onSpeechStart: () => {
             if (!isAnyPlaying()) return; // ignore if nothing to interrupt
             pauseAll();
-            getSocket().send(JSON.stringify({ type: 'vad_interrupt' }));
+            fetch('http://localhost:4000/api/vad-interrupt', { method: 'POST' });
           },
           onSpeechEnd: () => {},
           interval: 50,

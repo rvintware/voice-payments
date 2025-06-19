@@ -9,6 +9,7 @@ import { getFsm } from './fsm.js';
  */
 export function attachWS(httpServer) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws/session' });
+  globalThis.__wss = wss; // expose for other modules
 
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'hello', ts: Date.now() }));
@@ -72,4 +73,15 @@ export function attachWS(httpServer) {
 
   // eslint-disable-next-line no-console
   console.log('WebSocket layer attached at ws://localhost:4000/ws/session');
+}
+
+// Helper so HTTP routes can notify all clients without importing the WSS instance
+export function broadcastPauseAudio() {
+  const wss = globalThis.__wss;
+  if (!wss) return;
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify({ type: 'pause_audio' }));
+    }
+  });
 } 
