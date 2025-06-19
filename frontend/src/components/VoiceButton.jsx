@@ -315,6 +315,31 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
     };
   }, []);
 
+  // Allow holding the spacebar as a push-to-talk shortcut.
+  useEffect(() => {
+    function keyHandler(e) {
+      if (e.code !== 'Space' || e.repeat || e.altKey || e.metaKey || e.ctrlKey) return;
+      // Ignore if user is typing in an input element
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.type === 'keydown') {
+        if (!isRecording) startRecording();
+      } else if (e.type === 'keyup') {
+        if (isRecording) stopRecording();
+      }
+      e.preventDefault(); // stop page scroll
+    }
+
+    window.addEventListener('keydown', keyHandler);
+    window.addEventListener('keyup', keyHandler);
+    return () => {
+      window.removeEventListener('keydown', keyHandler);
+      window.removeEventListener('keyup', keyHandler);
+    };
+    // isRecording included so handler has current value
+  }, [isRecording]);
+
   return (
     <button
       className={`relative w-48 h-48 rounded-full bg-banking-purple transition shadow-2xl focus:outline-none
