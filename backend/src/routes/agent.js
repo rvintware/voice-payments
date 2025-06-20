@@ -3,6 +3,8 @@ import OpenAI from 'openai';
 import { toolRegistry } from '../tools/index.js';
 import { toOpenAIFunctionDef } from '../tools/types.js';
 import { moderateText } from '../utils/moderateText.js';
+import { parseChatResponse } from '../schemas/output.js';
+import { inc } from '../utils/metrics.js';
 
 const router = Router();
 
@@ -53,7 +55,24 @@ router.post('/agent', async (req, res) => {
         scratch.push({ role: 'tool', name, content: JSON.stringify(observation) });
         continue; // next loop
       } else {
-        return res.json({ answer: msg.content });
+        // Expect JSON from the model
+        let parsed;
+        try {
+          parsed = parseChatResponse(JSON.parse(msg.content));
+        } catch (err) {
+          console.warn('Output schema violation', err);
+          inc('output_schema_fail_total');
+          return res.json({ speak: 'Sorry, I had an error.', ui: 'error' });
+        }
+
+        // Final moderation on speak text
+        const outMod = await moderateText(parsed.speak);
+        if (!outMod.ok) {
+          inc('output_moderation_block_total');
+          return res.json({ speak: 'Sorry, I cannot repeat that.', ui: 'error' });
+        }
+
+        return res.json(parsed);
       }
     }
     return res.status(400).json({ error: 'loop_limit' });

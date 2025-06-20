@@ -73,4 +73,12 @@ if (process.env.NODE_ENV !== 'test') {
   })();
 }
 
+if (process.env.NODE_ENV !== 'production') {
+  import('./utils/metrics.js').then(({ metricsText }) => {
+    app.get('/metrics', (_req, res) => {
+      res.type('text/plain').send(metricsText());
+    });
+  });
+}
+
 export default app;
