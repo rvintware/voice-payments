@@ -18,7 +18,9 @@
     "number-to-words": "^1.2.4",
     "openai": "^4.14.0",
     "stripe": "^12.14.0",
-    "ws": "^8.18.2"
+    "ws": "^8.18.2",
+    "zod": "^3.25.67",
+    "zod-to-json-schema": "^3.24.5"
   },
   "devDependencies": {
     "nock": "^13.5.6",
