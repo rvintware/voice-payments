@@ -34,6 +34,7 @@ import searchRouter from './routes/transactionsSearch.js';
 import aggregateRouter from './routes/transactionsAggregate.js';
 import splitBillRouter from './routes/splitBill.js';
 import vadInterruptRouter from './routes/vadInterrupt.js';
+import agentRouter from './routes/agent.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
 app.use('/api', ttsRouter);
@@ -46,6 +47,7 @@ app.use('/api', searchRouter);
 app.use('/api', aggregateRouter);
 app.use('/api', splitBillRouter);
 app.use('/api', vadInterruptRouter);
+app.use('/api', agentRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });

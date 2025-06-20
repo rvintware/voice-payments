@@ -1,0 +1,66 @@
+import { Router } from 'express';
+import OpenAI from 'openai';
+import { toolRegistry } from '../tools/index.js';
+import { toOpenAIFunctionDef } from '../tools/types.js';
+import { moderateText } from '../utils/moderateText.js';
+
+const router = Router();
+
+router.post('/agent', async (req, res) => {
+  try {
+    const { text, sessionId = 'anon' } = req.body || {};
+    if (!text) return res.status(400).json({ error: 'text required' });
+
+    // Basic moderation before prompt injection
+    const mod = await moderateText(text);
+    if (!mod.ok) return res.status(403).json({ error: 'unsafe_text' });
+
+    const openai = new OpenAI();
+    const scratch = [];
+    for (let step = 0; step < 6; step++) {
+      const messages = [
+        {
+          role: 'system',
+          content:
+            'You are the Voice-Payments agent. Think step-by-step, call tools when needed. If a payment is required, call fsm_triggerConfirmRequest.',
+        },
+        ...scratch,
+        { role: 'user', content: text },
+      ];
+
+      const response = await openai.chat.completions.create({
+        model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-0613',
+        messages,
+        functions: toolRegistry.map(toOpenAIFunctionDef),
+        function_call: 'auto',
+        temperature: 0,
+      });
+
+      const msg = response.choices[0].message;
+      if (msg.function_call) {
+        const { name, arguments: rawArgs } = msg.function_call;
+        const tool = toolRegistry.find((t) => t.name === name);
+        if (!tool) throw new Error('unknown_tool');
+        let args;
+        try {
+          args = tool.argsSchema.parse(JSON.parse(rawArgs || '{}'));
+        } catch (err) {
+          return res.status(422).json({ error: 'bad_tool_args', details: err });
+        }
+        const observation = await tool.run(args, { sessionId });
+        // Validate result
+        tool.resultSchema.parse(observation);
+        scratch.push({ role: 'tool', name, content: JSON.stringify(observation) });
+        continue; // next loop
+      } else {
+        return res.json({ answer: msg.content });
+      }
+    }
+    return res.status(400).json({ error: 'loop_limit' });
+  } catch (err) {
+    console.error('agent error', err);
+    return res.status(500).json({ error: 'agent_failed' });
+  }
+});
+
+export default router; 
