@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { toolRegistry } from '../tools/index.js';
-import { toOpenAIFunctionDef } from '../tools/types.js';
+import { toOpenAIToolDef } from '../tools/types.js';
 import { moderateText } from '../utils/moderateText.js';
 import { parseChatResponse } from '../schemas/output.js';
 import { inc } from '../utils/metrics.js';
@@ -31,16 +31,17 @@ router.post('/agent', async (req, res) => {
       ];
 
       const response = await openai.chat.completions.create({
-        model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-0613',
+        model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo',
         messages,
-        functions: toolRegistry.map(toOpenAIFunctionDef),
+        tools: toolRegistry.map(toOpenAIToolDef),
         function_call: 'auto',
         temperature: 0,
       });
 
       const msg = response.choices[0].message;
-      if (msg.function_call) {
-        const { name, arguments: rawArgs } = msg.function_call;
+      const call = msg.tool_calls?.[0] || msg.function_call;
+      if (call) {
+        const { name, arguments: rawArgs, id: callId } = call;
         const tool = toolRegistry.find((t) => t.name === name);
         if (!tool) throw new Error('unknown_tool');
         let args;
@@ -52,7 +53,11 @@ router.post('/agent', async (req, res) => {
         const observation = await tool.run(args, { sessionId });
         // Validate result
         tool.resultSchema.parse(observation);
-        scratch.push({ role: 'tool', name, content: JSON.stringify(observation) });
+        scratch.push({
+          role: 'tool',
+          tool_call_id: callId ?? name, // id required for new API; fallback name
+          content: JSON.stringify(observation),
+        });
         continue; // next loop
       } else {
         // Expect JSON from the model

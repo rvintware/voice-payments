@@ -15,10 +15,13 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 /**
  * Convert Tool definition into OpenAI function-call parameters.
  */
-export function toOpenAIFunctionDef(tool) {
+export function toOpenAIToolDef(tool) {
   return {
-    name: tool.name,
-    description: tool.description,
-    parameters: zodToJsonSchema(tool.argsSchema),
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: zodToJsonSchema(tool.argsSchema),
+    },
   };
 } 
