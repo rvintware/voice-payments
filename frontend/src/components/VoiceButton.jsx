@@ -75,10 +75,10 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             return;
           }
           // Send transcript to interpret endpoint
-          const interpRes = await fetch('http://localhost:4000/api/interpret', {
+          const interpRes = await fetch('http://localhost:4000/api/agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ transcript: vtData.transcript }),
+            body: JSON.stringify({ text: vtData.transcript }),
           });
           const interpData = await interpRes.json();
 
@@ -87,57 +87,22 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             return;
           }
 
-          // Check for balance intent
-          if (interpData.intent === 'query_balance') {
-            const type = interpData.type;
-            const cents = type === 'pending'
-              ? pendingCents
-              : type === 'available'
-              ? availableCents
-              : (pendingCents ?? 0) + (availableCents ?? 0);
-
-            if (cents == null) {
-              alert('Balance is still loading, please try again');
-              return;
-            }
-
-            const dollars = (cents / 100).toFixed(2);
+          // New schema response handling
+          if (interpData.speak) {
             try {
-              await playSentence(`Your ${type} balance is ${dollars} Canadian dollars`);
-              return; // Do not proceed to payment flow
-            } catch (err) {
-              alert('Could not speak balance');
-              return;
-            }
-          }
-
-          // After we get interpData
-          if (interpData.intent === 'speak' && interpData.sentence) {
-            try {
-              await playSentence(interpData.sentence);
-            } catch (err) {
-              console.error('TTS playback error', err);
+              await playSentence(interpData.speak);
+            } catch {
               alert('Could not play speech');
             }
-            return;
           }
 
-          // After speak intent handling block
-          if (interpData.intent === 'split_links' && interpData.links) {
-            try {
-              await navigator.clipboard.writeText(interpData.links.map(l => l.url).join('\n'));
-            } catch (err) {
-              /* eslint-disable no-console */
-              console.warn('Clipboard write failed');
-            }
-            onPaymentLink?.('split', interpData);
-            return;
+          if (interpData.ui === 'link' && interpData.link) {
+            try { await navigator.clipboard.writeText(interpData.link); } catch {}
+            onPaymentLink?.('link', { url: interpData.link });
           }
 
-          // Hand over to confirmation dialog via callback if payment intent
-          if (interpData.amountCents && interpData.recipientEmail) {
-            onPaymentLink?.(null, { ...interpData, transcript: vtData.transcript });
-          }
+          // Early return – confirm requests continue to come via WS events
+          return;
         } catch (err) {
           alert('Error contacting backend');
         }

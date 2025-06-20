@@ -7,8 +7,23 @@ const router = Router();
 
 router.post('/interpret', async (req, res) => {
   try {
-    const { transcript } = req.body || {};
-    if (!transcript) return res.status(400).json({ error: 'transcript required' });
+    // Validate and clean incoming body
+    const { parseIncoming } = await import('../schemas/input.js');
+    let data;
+    try {
+      data = parseIncoming(req.body || {});
+    } catch (err) {
+      return res.status(400).json({ error: 'bad_transcript', details: err.errors ?? err.message });
+    }
+
+    const { transcript } = data;
+
+    // Content moderation – block profane or disallowed content early
+    const { moderateText } = await import('../utils/moderateText.js');
+    const modRes = await moderateText(transcript);
+    if (!modRes.ok) {
+      return res.status(403).json({ error: 'unsafe_content' });
+    }
 
     const openai = new OpenAI();
 
