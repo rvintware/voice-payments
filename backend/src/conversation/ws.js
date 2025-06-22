@@ -12,10 +12,11 @@ export function attachWS(httpServer) {
   globalThis.__wss = wss; // expose for other modules
 
   wss.on('connection', (ws) => {
-    ws.send(JSON.stringify({ type: 'hello', ts: Date.now() }));
+    // Derive a stable session id from the client IP so that HTTP and WS paths share the same key.
+    const sessionId = ws._socket.remoteAddress;
 
-    // For demo we derive sessionId from remoteAddress; a prod build would use a cookie or JWT
-    const sessionId = ws._socket.remoteAddress + ':' + (ws._socket.remotePort || '');
+    // Send a hello handshake that echoes the sessionId so the browser can attach it to future requests if needed.
+    ws.send(JSON.stringify({ type: 'hello', sessionId, ts: Date.now() }));
 
     const fsm = getFsm(sessionId, async (eventType, payload) => {
       // Simple emitter that serialises events onto this socket

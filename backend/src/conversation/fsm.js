@@ -99,11 +99,21 @@ export class ConversationFSM {
   }
 }
 
-// Simple factory that keeps one FSM per session id
+// Simple factory that keeps one FSM per session id. If a subsequent call
+// supplies a *better* emitter (e.g. when the WebSocket attaches) upgrade the
+// stored FSM so that future FSM events reach the correct output channel.
 const fsms = new Map();
 export function getFsm(sessionId, emit) {
-  if (!fsms.has(sessionId)) {
-    fsms.set(sessionId, new ConversationFSM({ emit }));
+  let fsm = fsms.get(sessionId);
+  if (!fsm) {
+    fsm = new ConversationFSM({ emit: emit || (() => {}) });
+    fsms.set(sessionId, fsm);
+  } else if (emit && emit !== fsm.emit) {
+    fsm.emit = emit;
+    // If we were already waiting for confirmation before the socket arrived, resend
+    if (fsm.state === 'ConfirmWait' && fsm.context.pendingSentence) {
+      fsm.emit('confirm_request', { sentence: fsm.context.pendingSentence });
+    }
   }
-  return fsms.get(sessionId);
+  return fsm;
 } 

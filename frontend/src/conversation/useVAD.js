@@ -7,7 +7,7 @@ import { getSocket } from './socketSingleton.js';
 // it pauses all audio and notifies the server.
 export default function useVAD() {
   useEffect(() => {
-    if (import.meta.env.VITE_INTERRUPTIONS_MVP !== 'true') return;
+    // Run VAD regardless of env flag so barge-in always functions.
     let stop;
 
     async function init() {

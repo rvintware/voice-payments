@@ -75,10 +75,12 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             return;
           }
           // Send transcript to interpret endpoint
+          const body = { text: vtData.transcript };
+          if (window.__vpSessionId) body.sessionId = window.__vpSessionId;
           const interpRes = await fetch('http://localhost:4000/api/agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: vtData.transcript }),
+            body: JSON.stringify(body),
           });
           const interpData = await interpRes.json();
 
@@ -99,6 +101,8 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
           if (interpData.ui === 'link' && interpData.link) {
             try { await navigator.clipboard.writeText(interpData.link); } catch {}
             onPaymentLink?.('link', { url: interpData.link });
+          } else if (interpData.ui === 'links' && Array.isArray(interpData.links)) {
+            onPaymentLink?.('split', { links: interpData.links });
           }
 
           // Early return – confirm requests continue to come via WS events

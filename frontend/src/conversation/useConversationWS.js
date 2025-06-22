@@ -7,13 +7,18 @@ export default function useConversationWS() {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    if (import.meta.env.VITE_INTERRUPTIONS_MVP !== 'true') return;
+    // Always initialise the singleton WebSocket – no feature flag in dev.
     wsRef.current = getSocket();
 
     // Listen for server commands like pause_audio without clobbering existing listeners
     const handleMsg = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        // Cache session id announced by the server so HTTP calls can attach it.
+        if (msg.type === 'hello' && msg.sessionId) {
+          window.__vpSessionId = msg.sessionId;
+          return; // nothing else to handle for hello
+        }
         if (msg.type === 'pause_audio') {
           pauseAll();
         } else if (msg.type === 'confirm_request') {
