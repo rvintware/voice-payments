@@ -5,6 +5,7 @@ import { toOpenAIToolDef } from '../tools/types.js';
 import { moderateText } from '../utils/moderateText.js';
 import { parseChatResponse } from '../schemas/output.js';
 import { inc } from '../utils/metrics.js';
+import { voicePaymentsSystemPrompt } from '../prompts/voicePaymentsSystem.js';
 
 const router = Router();
 
@@ -28,20 +29,7 @@ router.post('/agent', async (req, res) => {
       const messages = [
         {
           role: 'system',
-          content: `You are the Voice-Payments agent.
-TOOLS AVAILABLE:
-• fsm_triggerConfirmRequest – must be the FIRST call for any money movement so the user can confirm.
-• stripe_createCheckout       – completes payment after user confirmation.
-• split_bill                 – splits a total amount and returns payment links.
-• transactions_listRecent     – returns the most recent transactions.
-• bank_getBalance            – returns the CAD available balance.
-
-RULES:
-1. You MUST call a tool every turn unless you are producing the final answer.
-2. If no tool fits, respond with the final JSON object.
-3. The final answer must be exactly one line of JSON: {"speak":"…","ui":"none|confirm|link|links|error","link":"…"} – no markdown fences or extra text.
-4. Keep speak under 200 characters.
-5. For security never guess account balances or statuses; always rely on tools.`,
+          content: voicePaymentsSystemPrompt,
         },
         ...scratch,
       ];
@@ -50,6 +38,7 @@ RULES:
         model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo',
         messages,
         tools: toolRegistry.map(toOpenAIToolDef),
+        // Require a tool call only on the very first turn; later turns may return final JSON.
         tool_choice: step === 0 ? 'required' : 'auto',
         temperature: 0,
       });
@@ -58,6 +47,19 @@ RULES:
       // OpenAI tools format: each entry has { id, type:'function', function:{ name, arguments } }
       const toolCall = msg.tool_calls?.[0];
       if (toolCall) {
+        // Prevent bypassing the confirmation phase: the FIRST tool call for any
+        // money-moving intent must always be fsm_triggerConfirmRequest.
+        const moneyTools = new Set(['stripe_createCheckout', 'split_bill']);
+        if (step === 0 && moneyTools.has(toolCall.function?.name)) {
+          // Record metric and tell the model to retry correctly.
+          inc('confirmation_bypass_blocked_total');
+          scratch.push({
+            role: 'system',
+            content: 'ERROR: You must call fsm_triggerConfirmRequest first when moving money. Retry now.',
+          });
+          continue; // Ask the model to try again without advancing execution.
+        }
+
         const { name, arguments: rawArgs } = toolCall.function || {};
         const callId = toolCall.id;
         const tool = toolRegistry.find((t) => t.name === name);
@@ -89,7 +91,12 @@ RULES:
           // Grab only the first well-formed JSON object to ignore extra chatter
           const jsonMatch = raw.match(/\{[\s\S]*?\}/);
           if (!jsonMatch) throw new Error('no_json_found');
-          parsed = parseChatResponse(JSON.parse(jsonMatch[0]));
+          const preliminaryObj = JSON.parse(jsonMatch[0]);
+          if (typeof preliminaryObj.speak === 'string' && preliminaryObj.speak.length > 400) {
+            preliminaryObj.speak = preliminaryObj.speak.slice(0, 400);
+            inc('speak_truncated_total');
+          }
+          parsed = parseChatResponse(preliminaryObj);
         } catch (err) {
           console.warn('Output schema violation', err);
           inc('output_schema_fail_total');

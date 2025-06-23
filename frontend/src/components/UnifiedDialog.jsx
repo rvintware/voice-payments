@@ -60,7 +60,7 @@ export default function UnifiedDialog({ payload, onClose, onCancel }) {
   const dollars = amountCents ? (amountCents / 100).toFixed(2) : null;
 
   // Speak confirmation sentence once (like old ConfirmationDialog)
-  useTTS(amountCents && recipientEmail ? { amountCents, name } : null);
+  useTTS(amountCents && recipientEmail ? { amountCents, name } : undefined);
 
   // Auto-actions when result arrives (single-link case)
   useEffect(() => {

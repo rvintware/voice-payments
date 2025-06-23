@@ -103,6 +103,9 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
             onPaymentLink?.('link', { url: interpData.link });
           } else if (interpData.ui === 'links' && Array.isArray(interpData.links)) {
             onPaymentLink?.('split', { links: interpData.links });
+          } else if (interpData.ui === 'confirm' && interpData.speak) {
+            // Some agent versions send confirm via HTTP instead of WS; normalise to WS event
+            window.dispatchEvent(new CustomEvent('confirm_request', { detail: { sentence: interpData.speak } }));
           }
 
           // Early return – confirm requests continue to come via WS events
@@ -111,30 +114,47 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
           alert('Error contacting backend');
         }
       } else if (mode === 'answer') {
+        // 1️⃣  Transcribe the confirmation reply via Whisper
         const formData = new FormData();
         formData.append('audio', blob, 'audio.webm');
-        formData.append('amountCents', answerPayload.amountCents);
-        formData.append('recipientEmail', answerPayload.recipientEmail);
         try {
-          const res = await fetch('http://localhost:4000/api/voice-confirm', {
+          const vtRes = await fetch('http://localhost:4000/api/voice-to-text', {
             method: 'POST',
             body: formData,
           });
-          const data = await res.json();
+          const vtData = await vtRes.json();
+          if (!vtRes.ok) {
+            alert(vtData.error || 'Could not process speech');
+            return;
+          }
 
-          if (data.decision === 'yes') {
-            if (data.url) {
-              try {
-                await navigator.clipboard.writeText(data.url);
-              } catch {/* clipboard may fail silently */}
-              await playSentence('Payment confirmed. I have copied the link to your clipboard.');
-            } else {
-              await playSentence('Payment confirmed.');
-            }
-          } else if (data.decision === 'no') {
-            await playSentence('Okay, I cancelled the payment.');
-          } else {
-            alert('I did not catch that, please try again');
+          // 2️⃣  Pass the transcript back into the agent – it now sits in confirmation mode
+          const body = { text: vtData.transcript };
+          if (window.__vpSessionId) body.sessionId = window.__vpSessionId;
+          const agentRes = await fetch('http://localhost:4000/api/agent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const agentData = await agentRes.json();
+          if (!agentRes.ok) {
+            alert(agentData.error || 'Backend error');
+            return;
+          }
+
+          // 3️⃣  Handle deterministic agent response
+          if (agentData.speak) {
+            try { await playSentence(agentData.speak); } catch {/* ignore */}
+          }
+
+          if (agentData.ui === 'link' && agentData.link) {
+            try { await navigator.clipboard.writeText(agentData.link); } catch {/* ignore */}
+            onPaymentLink?.('link', { url: agentData.link });
+          } else if (agentData.ui === 'links' && Array.isArray(agentData.links)) {
+            onPaymentLink?.('split', { links: agentData.links });
+          } else if (agentData.ui === 'confirm' && agentData.speak) {
+            // Edge-case: agent may re-ask for confirmation if unsure
+            window.dispatchEvent(new CustomEvent('confirm_request', { detail: { sentence: agentData.speak } }));
           }
         } catch (err) {
           alert('Error contacting backend');

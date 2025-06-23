@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getFsm } from '../conversation/fsm.js';
 
-const Args = z.object({ sentence: z.string().max(200) });
+const Args = z.object({ sentence: z.string().max(400) });
 const Result = z.object({ ok: z.literal(true) });
 
 /** @type {Tool<typeof Args, typeof Result>} */

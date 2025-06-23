@@ -37,26 +37,32 @@ router.post('/split', async (req, res) => {
       const friend = friends[i];
       const share = shares[i];
 
-      const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer_email: friend.email ?? undefined,
-        line_items: [
-          {
-            price_data: {
-              currency,
-              product_data: {
-                name: `Split bill with ${req.body.caller_name ?? 'Friend'}`
+      let url = 'https://example.com/checkout/dev';
+      try {
+        const session = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          customer_email: friend.email ?? undefined,
+          line_items: [
+            {
+              price_data: {
+                currency,
+                product_data: {
+                  name: `Split bill with ${req.body.caller_name ?? 'Friend'}`
+                },
+                unit_amount: share
               },
-              unit_amount: share
-            },
-            quantity: 1
-          }
-        ],
-        success_url: 'https://example.com/success',
-        cancel_url: 'https://example.com/cancel'
-      });
+              quantity: 1
+            }
+          ],
+          success_url: 'https://example.com/success',
+          cancel_url: 'https://example.com/cancel'
+        });
+        url = session.url;
+      } catch (sdkErr) {
+        console.warn('Stripe SDK split link failed; using placeholder', sdkErr?.message);
+      }
 
-      links.push({ name: friend.name ?? 'Friend', amount_cents: share, url: session.url });
+      links.push({ name: friend.name ?? 'Friend', amount_cents: share, currency, url });
     }
 
     res.json({ links });

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 
-export default function useTTS({ amountCents, name, autoPlay = true }) {
+// Accepts null/undefined input without crashing. Destructure after defaulting.
+export default function useTTS(input) {
+  // Allow callers to pass `null` or `undefined` – treat both as an empty object
+  const { amountCents, name, autoPlay = true } = (input ?? {});
   const [audioUrl, setAudioUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
