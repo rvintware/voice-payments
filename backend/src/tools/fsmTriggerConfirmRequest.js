@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getFsm } from '../conversation/fsm.js';
 
-const Args = z.object({ session_id: z.string(), sentence: z.string().max(200) });
+const Args = z.object({ sentence: z.string().max(400) });
 const Result = z.object({ ok: z.literal(true) });
 
 /** @type {Tool<typeof Args, typeof Result>} */
@@ -10,8 +10,8 @@ export const fsmTriggerConfirmRequest = {
   description: 'Ask the user to confirm a money action',
   argsSchema: Args,
   resultSchema: Result,
-  async run({ session_id, sentence }) {
-    const fsm = getFsm(session_id, () => {});
+  async run({ sentence }, ctx) {
+    const fsm = getFsm(ctx.sessionId, () => {});
     fsm.send({ type: 'GPT_RESULT', risk: 'money', sentence });
     return { ok: true };
   },

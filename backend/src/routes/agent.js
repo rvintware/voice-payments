@@ -1,16 +1,19 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { toolRegistry } from '../tools/index.js';
-import { toOpenAIFunctionDef } from '../tools/types.js';
+import { toOpenAIToolDef } from '../tools/types.js';
 import { moderateText } from '../utils/moderateText.js';
 import { parseChatResponse } from '../schemas/output.js';
 import { inc } from '../utils/metrics.js';
+import { voicePaymentsSystemPrompt } from '../prompts/voicePaymentsSystem.js';
 
 const router = Router();
 
 router.post('/agent', async (req, res) => {
   try {
-    const { text, sessionId = 'anon' } = req.body || {};
+    const { text, sessionId: bodySession } = req.body || {};
+    // Unify session identification with the WebSocket layer (which uses client IP).
+    const sessionId = bodySession || req.ip;
     if (!text) return res.status(400).json({ error: 'text required' });
 
     // Basic moderation before prompt injection
@@ -18,29 +21,47 @@ router.post('/agent', async (req, res) => {
     if (!mod.ok) return res.status(403).json({ error: 'unsafe_text' });
 
     const openai = new OpenAI();
-    const scratch = [];
+    // Chat ledger – start with the user message once and keep appending turns
+    const scratch = [
+      { role: 'user', content: text },
+    ];
     for (let step = 0; step < 6; step++) {
       const messages = [
         {
           role: 'system',
-          content:
-            'You are the Voice-Payments agent. Think step-by-step, call tools when needed. If a payment is required, call fsm_triggerConfirmRequest.',
+          content: voicePaymentsSystemPrompt,
         },
         ...scratch,
-        { role: 'user', content: text },
       ];
 
       const response = await openai.chat.completions.create({
-        model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-0613',
+        model: process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo',
         messages,
-        functions: toolRegistry.map(toOpenAIFunctionDef),
-        function_call: 'auto',
+        tools: toolRegistry.map(toOpenAIToolDef),
+        // Require a tool call only on the very first turn; later turns may return final JSON.
+        tool_choice: step === 0 ? 'required' : 'auto',
         temperature: 0,
       });
 
       const msg = response.choices[0].message;
-      if (msg.function_call) {
-        const { name, arguments: rawArgs } = msg.function_call;
+      // OpenAI tools format: each entry has { id, type:'function', function:{ name, arguments } }
+      const toolCall = msg.tool_calls?.[0];
+      if (toolCall) {
+        // Prevent bypassing the confirmation phase: the FIRST tool call for any
+        // money-moving intent must always be fsm_triggerConfirmRequest.
+        const moneyTools = new Set(['stripe_createCheckout', 'split_bill']);
+        if (step === 0 && moneyTools.has(toolCall.function?.name)) {
+          // Record metric and tell the model to retry correctly.
+          inc('confirmation_bypass_blocked_total');
+          scratch.push({
+            role: 'system',
+            content: 'ERROR: You must call fsm_triggerConfirmRequest first when moving money. Retry now.',
+          });
+          continue; // Ask the model to try again without advancing execution.
+        }
+
+        const { name, arguments: rawArgs } = toolCall.function || {};
+        const callId = toolCall.id;
         const tool = toolRegistry.find((t) => t.name === name);
         if (!tool) throw new Error('unknown_tool');
         let args;
@@ -52,13 +73,30 @@ router.post('/agent', async (req, res) => {
         const observation = await tool.run(args, { sessionId });
         // Validate result
         tool.resultSchema.parse(observation);
-        scratch.push({ role: 'tool', name, content: JSON.stringify(observation) });
+        scratch.push(msg);
+        scratch.push({
+          role: 'tool',
+          tool_call_id: callId ?? name, // id required for new API; fallback name
+          content: JSON.stringify(observation),
+        });
         continue; // next loop
       } else {
         // Expect JSON from the model
         let parsed;
         try {
-          parsed = parseChatResponse(JSON.parse(msg.content));
+          const raw = msg.content.trim()
+            .replace(/^```json\s*/i, '')   // remove leading ```json
+            .replace(/^```/, '')            // or bare ```
+            .replace(/```\s*$/, '');       // trailing fence
+          // Grab only the first well-formed JSON object to ignore extra chatter
+          const jsonMatch = raw.match(/\{[\s\S]*?\}/);
+          if (!jsonMatch) throw new Error('no_json_found');
+          const preliminaryObj = JSON.parse(jsonMatch[0]);
+          if (typeof preliminaryObj.speak === 'string' && preliminaryObj.speak.length > 400) {
+            preliminaryObj.speak = preliminaryObj.speak.slice(0, 400);
+            inc('speak_truncated_total');
+          }
+          parsed = parseChatResponse(preliminaryObj);
         } catch (err) {
           console.warn('Output schema violation', err);
           inc('output_schema_fail_total');
