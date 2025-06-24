@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Stripe from 'stripe';
 import dotenv from 'dotenv';
 import { equalSplit } from '../utils/shareCalculator.js';
+import { normalizeFriends } from '../utils/friendHelpers.js';
 
 dotenv.config();
 
@@ -25,17 +26,30 @@ const router = Router();
  */
 router.post('/split', async (req, res) => {
   try {
-    const { total_cents, currency = 'usd', friends } = req.body || {};
-    if (!total_cents || !Array.isArray(friends) || friends.length === 0) {
-      return res.status(400).json({ error: 'total_cents and friends[] required' });
+    let { currency = 'usd' } = req.body || {};
+
+    // 1) Flexible total field names
+    let rawTotal = req.body.total_cents ?? req.body.amount_cents ?? req.body.total;
+    const total_cents = Math.round(Number(rawTotal));
+    if (!Number.isFinite(total_cents) || total_cents <= 0) {
+      return res.status(400).json({ error: 'invalid_total' });
     }
 
-    const shares = equalSplit(total_cents, friends.length);
+    // 2) Normalise friends list
+    const friends = normalizeFriends(req.body.friends);
+    if (!friends) {
+      return res.status(400).json({ error: 'friends_required' });
+    }
+
+    // Dutch split: caller also pays a share, so divide by friends+1.
+    const shares = equalSplit(total_cents, friends.length + 1);
+    // eslint-disable-next-line no-console
+    console.debug('[SPLIT shares]', { total_cents, shares });
 
     const links = [];
     for (let i = 0; i < friends.length; i += 1) {
       const friend = friends[i];
-      const share = shares[i];
+      const share = shares[i + 1]; // skip caller's own share at index 0
 
       let url = 'https://example.com/checkout/dev';
       try {

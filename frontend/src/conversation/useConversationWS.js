@@ -25,6 +25,16 @@ export default function useConversationWS() {
           window.dispatchEvent(new CustomEvent('confirm_request', { detail: msg }));
         } else if (msg.type === 'speak_sentence' && msg.sentence) {
           playSentence(msg.sentence);
+          // If the payload contains a payment link / links, forward it so the
+          // dialog can transition to the "result" phase. Otherwise, treat it
+          // as a simple spoken reply and close the confirmation flow.
+          if (msg.url || msg.links) {
+            window.dispatchEvent(new CustomEvent('payment_result', { detail: msg }));
+          } else {
+            window.dispatchEvent(new Event('confirm_done'));
+          }
+        } else if (msg.type === 'confirm_cancelled') {
+          window.dispatchEvent(new Event('confirm_done'));
         }
       } catch {
         /* ignore invalid json */

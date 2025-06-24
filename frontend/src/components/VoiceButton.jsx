@@ -34,8 +34,14 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
       setIsRecording(true);
 
       if (import.meta.env.VITE_INTERRUPTIONS_MVP === 'true') {
+        // Always pause local TTS so the user is not speaking over playback.
         pauseAll();
-        fetch('http://localhost:4000/api/vad-interrupt', { method: 'POST' });
+        // Only inform the backend of an interrupt when capturing a *new* command;
+        // doing this in answer mode would prematurely cancel the pending
+        // confirmation and lead to a 409 no_pending_confirmation error.
+        if (mode === 'command') {
+          fetch('http://localhost:4000/api/vad-interrupt', { method: 'POST' });
+        }
       }
     } catch (err) {
       console.error('Mic access error', err);
@@ -131,30 +137,27 @@ export default function VoiceButton({ mode = 'command', onPaymentLink, answerPay
           // 2️⃣  Pass the transcript back into the agent – it now sits in confirmation mode
           const body = { text: vtData.transcript };
           if (window.__vpSessionId) body.sessionId = window.__vpSessionId;
-          const agentRes = await fetch('http://localhost:4000/api/agent', {
+          const confirmRes = await fetch('http://localhost:4000/api/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify({ answer: vtData.transcript.trim().toLowerCase(), sessionId: window.__vpSessionId }),
           });
-          const agentData = await agentRes.json();
-          if (!agentRes.ok) {
-            alert(agentData.error || 'Backend error');
+          const confirmData = await confirmRes.json();
+          if (!confirmRes.ok) {
+            alert(confirmData.error || 'Backend error');
             return;
           }
-
-          // 3️⃣  Handle deterministic agent response
-          if (agentData.speak) {
-            try { await playSentence(agentData.speak); } catch {/* ignore */}
+          // Fallback: if WS missed the event, use the HTTP payload.
+          if (confirmData.speak) {
+            try {
+              await playSentence(confirmData.speak);
+            } catch {}
           }
-
-          if (agentData.ui === 'link' && agentData.link) {
-            try { await navigator.clipboard.writeText(agentData.link); } catch {/* ignore */}
-            onPaymentLink?.('link', { url: agentData.link });
-          } else if (agentData.ui === 'links' && Array.isArray(agentData.links)) {
-            onPaymentLink?.('split', { links: agentData.links });
-          } else if (agentData.ui === 'confirm' && agentData.speak) {
-            // Edge-case: agent may re-ask for confirmation if unsure
-            window.dispatchEvent(new CustomEvent('confirm_request', { detail: { sentence: agentData.speak } }));
+          if (confirmData.url || confirmData.links) {
+            window.dispatchEvent(new CustomEvent('payment_result', { detail: confirmData }));
+          } else {
+            // Assume flow done if no payment data
+            window.dispatchEvent(new Event('confirm_done'));
           }
         } catch (err) {
           alert('Error contacting backend');

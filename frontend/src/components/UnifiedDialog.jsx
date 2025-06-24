@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import PropTypes from 'prop-types';
 import useTTS from '../hooks/useTTS.js';
 import VoiceButton from './VoiceButton.jsx';
 
@@ -52,6 +53,25 @@ export default function UnifiedDialog({ payload, onClose, onCancel }) {
     };
   }, [onCancel]);
 
+  useEffect(() => {
+    function done() {
+      onClose?.();
+    }
+    window.addEventListener('confirm_done', done);
+    return () => window.removeEventListener('confirm_done', done);
+  }, [onClose]);
+
+  // Listen for the WebSocket push that carries the payment link(s).
+  useEffect(() => {
+    function handleResult(e) {
+      const detail = e.detail || {};
+      setResultData(detail.url ? detail : detail);
+      setPhase('result');
+    }
+    window.addEventListener('payment_result', handleResult);
+    return () => window.removeEventListener('payment_result', handleResult);
+  }, []);
+
   if (!payload) return null; // nothing to show
 
   // Extract commonly-used fields
@@ -60,7 +80,7 @@ export default function UnifiedDialog({ payload, onClose, onCancel }) {
   const dollars = amountCents ? (amountCents / 100).toFixed(2) : null;
 
   // Speak confirmation sentence once (like old ConfirmationDialog)
-  useTTS(amountCents && recipientEmail ? { amountCents, name } : undefined);
+  useTTS(amountCents && recipientEmail ? { amountCents, name } : null);
 
   // Auto-actions when result arrives (single-link case)
   useEffect(() => {
@@ -162,7 +182,14 @@ export default function UnifiedDialog({ payload, onClose, onCancel }) {
                 <div className="flex items-center justify-between gap-2 mb-6">
                   <div>
                     <p className="font-medium">{resultData.name}</p>
-                    <p className="text-sm text-gray-600">{(resultData.amount_cents / 100).toLocaleString(undefined, { style: 'currency', currency: (resultData.currency || 'usd').toUpperCase() })}</p>
+                    <p className="text-sm text-gray-600">{
+                      typeof resultData.amount_cents === 'number'
+                        ? (resultData.amount_cents / 100).toLocaleString(undefined, {
+                            style: 'currency',
+                            currency: (resultData.currency || 'usd').toUpperCase(),
+                          })
+                        : 'Payment link generated'
+                    }</p>
                   </div>
                   <button
                     className="px-2 py-1 text-xs bg-banking-purple text-white rounded"
@@ -202,4 +229,15 @@ export default function UnifiedDialog({ payload, onClose, onCancel }) {
       </div>
     </div>
   );
-} 
+}
+
+// Runtime prop validation – helps catch undefined fields early in dev
+UnifiedDialog.propTypes = {
+  payload: PropTypes.shape({
+    sentence: PropTypes.string,
+    amountCents: PropTypes.number,
+    recipientEmail: PropTypes.string,
+  }),
+  onClose: PropTypes.func.isRequired,
+  onCancel: PropTypes.func,
+}; 

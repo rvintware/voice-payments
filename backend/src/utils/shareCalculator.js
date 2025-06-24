@@ -1,4 +1,5 @@
 export function equalSplit(totalCents, n) {
+  totalCents = Math.round(Number(totalCents));
   if (!Number.isInteger(totalCents) || totalCents <= 0) throw new Error('totalCents must be positive integer');
   if (!Number.isInteger(n) || n <= 0) throw new Error('n must be positive integer');
   const base = Math.floor(totalCents / n);

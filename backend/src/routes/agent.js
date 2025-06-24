@@ -25,6 +25,8 @@ router.post('/agent', async (req, res) => {
     const scratch = [
       { role: 'user', content: text },
     ];
+    // Track whether the model has already triggered the confirmation request
+    let confirmSeen = false;
     for (let step = 0; step < 6; step++) {
       const messages = [
         {
@@ -50,17 +52,22 @@ router.post('/agent', async (req, res) => {
         // Prevent bypassing the confirmation phase: the FIRST tool call for any
         // money-moving intent must always be fsm_triggerConfirmRequest.
         const moneyTools = new Set(['stripe_createCheckout', 'split_bill']);
-        if (step === 0 && moneyTools.has(toolCall.function?.name)) {
-          // Record metric and tell the model to retry correctly.
+        const { name, arguments: rawArgs } = toolCall.function || {};
+
+        // Enforce deterministic two-step flow: the first money-moving tool MUST be preceded by fsm_triggerConfirmRequest
+        if (moneyTools.has(name) && !confirmSeen) {
           inc('confirmation_bypass_blocked_total');
           scratch.push({
             role: 'system',
             content: 'ERROR: You must call fsm_triggerConfirmRequest first when moving money. Retry now.',
           });
-          continue; // Ask the model to try again without advancing execution.
+          continue; // retry
         }
 
-        const { name, arguments: rawArgs } = toolCall.function || {};
+        if (name === 'fsm_triggerConfirmRequest') {
+          confirmSeen = true;
+        }
+
         const callId = toolCall.id;
         const tool = toolRegistry.find((t) => t.name === name);
         if (!tool) throw new Error('unknown_tool');
@@ -73,6 +80,14 @@ router.post('/agent', async (req, res) => {
         const observation = await tool.run(args, { sessionId });
         // Validate result
         tool.resultSchema.parse(observation);
+
+        // If this was the confirmation trigger, reply immediately so the UI
+        // can open the modal and switch to "answer" mode.
+        if (name === 'fsm_triggerConfirmRequest') {
+          return res.json({ speak: args.sentence, ui: 'confirm' });
+        }
+
+        // Otherwise keep the chat ledger and let the loop continue.
         scratch.push(msg);
         scratch.push({
           role: 'tool',
