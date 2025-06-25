@@ -8,20 +8,50 @@ import { getFsm } from './fsm.js';
  * @param {import('http').Server} httpServer Node HTTP server instance
  */
 export function attachWS(httpServer) {
+  // eslint-disable-next-line no-console
+  console.log('### WS helper reloaded', Date.now());
   const wss = new WebSocketServer({ server: httpServer, path: '/ws/session' });
   globalThis.__wss = wss; // expose for other modules
+
+  // Simple per-session buffer so that FSM events generated while a socket is
+  // reconnecting are not lost. Maps sessionId → Array<{type, payload}>.
+  const pendingBySession = new Map();
 
   wss.on('connection', (ws) => {
     // Derive a stable session id from the client IP so that HTTP and WS paths share the same key.
     const sessionId = ws._socket.remoteAddress;
 
+    // Flush any messages that were queued while there was no open socket.
+    const backlog = pendingBySession.get(sessionId);
+    if (Array.isArray(backlog) && backlog.length) {
+      backlog.forEach(({ type, payload }) => {
+        if (ws.readyState === 1) {
+          // eslint-disable-next-line no-console
+          console.debug('[WS flush]', type);
+          ws.send(JSON.stringify({ type, ...payload }));
+        }
+      });
+      backlog.length = 0; // keep the same array instance but clear it
+    }
+
     // Send a hello handshake that echoes the sessionId so the browser can attach it to future requests if needed.
     ws.send(JSON.stringify({ type: 'hello', sessionId, ts: Date.now() }));
 
     const fsm = getFsm(sessionId, async (eventType, payload) => {
-      // Simple emitter that serialises events onto this socket
+      // Buffered emitter: if the socket is open, deliver immediately, else queue.
       if (ws.readyState === 1) {
+        // eslint-disable-next-line no-console
+        console.debug('[WS out]', eventType, { rs: ws.readyState });
         ws.send(JSON.stringify({ type: eventType, ...payload }));
+      } else {
+        let arr = pendingBySession.get(sessionId);
+        if (!arr) {
+          arr = [];
+          pendingBySession.set(sessionId, arr);
+        }
+        arr.push({ type: eventType, payload });
+        // eslint-disable-next-line no-console
+        console.debug('[WS buffer]', eventType, { rs: ws.readyState, queued: arr.length });
       }
 
       // Handle side-effects that require server resources
@@ -69,7 +99,9 @@ export function attachWS(httpServer) {
       }
     });
 
-    ws.on('close', () => {});
+    ws.on('close', () => {
+      // Nothing to clean up; the buffer stays until next reconnect.
+    });
   });
 
   // eslint-disable-next-line no-console

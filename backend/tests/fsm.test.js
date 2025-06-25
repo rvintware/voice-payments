@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ConversationFSM } from '../src/conversation/fsm.js';
+import { ConversationFSM, CONFIRM_TIMEOUT_MS } from '../src/conversation/fsm.js';
 
 function makeFsm() {
   const events = [];
@@ -25,7 +25,7 @@ describe('ConversationFSM (blob flow)', () => {
     expect(fsm.getState()).toBe('Idle');
   });
 
-  it('money path with 8s timeout', () => {
+  it('money path with timeout', () => {
     vi.useFakeTimers();
     const { fsm, events } = makeFsm();
 
@@ -36,8 +36,8 @@ describe('ConversationFSM (blob flow)', () => {
     expect(fsm.getState()).toBe('ConfirmWait');
     expect(events.at(-1).type).toBe('confirm_request');
 
-    // advance 8s to trigger timeout
-    vi.advanceTimersByTime(8100);
+    // advance past the confirmation window to trigger timeout
+    vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 100);
     expect(fsm.getState()).toBe('Idle');
     expect(events.at(-2).type).toBe('confirm_cancelled');
     expect(events.at(-1).type).toBe('state_change');

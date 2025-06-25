@@ -16,6 +16,9 @@ const Args = z.object({
 
 const Result = z.object({
   url: z.string().url(),
+  amount_cents: z.number().positive(),
+  currency: z.string().length(3).default('cad'),
+  name: z.string(),
 });
 
 /** @type {Tool<typeof Args, typeof Result>} */
@@ -25,6 +28,12 @@ export const stripeCreateCheckout = {
   argsSchema: Args,
   resultSchema: Result,
   async run({ amount_cents, recipient_email }) {
+    const common = {
+      amount_cents,
+      currency: 'cad',
+      name: `Payment to ${recipient_email}`,
+    };
+
     // First attempt: official SDK
     try {
       const session = await stripe.checkout.sessions.create({
@@ -44,7 +53,7 @@ export const stripeCreateCheckout = {
         cancel_url: 'https://example.com/cancel',
         metadata: { recipient: recipient_email },
       });
-      return { url: session.url };
+      return { url: session.url, ...common };
     } catch (sdkErr) {
       console.warn('Stripe SDK failed, falling back to REST', sdkErr?.message);
     }
@@ -72,12 +81,12 @@ export const stripeCreateCheckout = {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
-      if (json.url) return { url: json.url };
+      if (json.url) return { url: json.url, ...common };
     } catch (httpErr) {
       console.error('Stripe REST fallback failed', httpErr?.message);
     }
 
     // Final deterministic placeholder so agent flow continues
-    return { url: 'https://example.com/checkout/dev' };
+    return { url: 'https://example.com/checkout/dev', ...common };
   },
 }; 

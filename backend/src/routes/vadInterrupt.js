@@ -11,7 +11,15 @@ router.post('/vad-interrupt', (req, res) => {
     // For demo we derive session id from remote address (same as ws.js)
     const sessionId = req.ip;
     const fsm = getFsm(sessionId, () => {});
-    fsm.send('USER_INTERRUPT');
+    // Debug print – helps diagnose accidental VAD hits
+    // eslint-disable-next-line no-console
+    console.debug('[VAD interrupt]', { sessionId, state: fsm.state });
+    // Only cancel TTS / restart recording if the FSM was actually speaking or
+    // thinking. During ConfirmWait we must NOT send USER_INTERRUPT otherwise
+    // it kicks the FSM back to Recording and breaks the yes/no flow.
+    if (fsm.state === 'Speaking' || fsm.state === 'Thinking') {
+      fsm.send('USER_INTERRUPT');
+    }
     broadcastPauseAudio();
     return res.sendStatus(204);
   } catch (err) {

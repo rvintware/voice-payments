@@ -35,6 +35,7 @@ import aggregateRouter from './routes/transactionsAggregate.js';
 import splitBillRouter from './routes/splitBill.js';
 import vadInterruptRouter from './routes/vadInterrupt.js';
 import agentRouter from './routes/agent.js';
+import confirmRouter from './routes/confirm.js';
 app.use('/api', voiceRouter);
 app.use('/api', paymentRouter);
 app.use('/api', ttsRouter);
@@ -48,6 +49,7 @@ app.use('/api', aggregateRouter);
 app.use('/api', splitBillRouter);
 app.use('/api', vadInterruptRouter);
 app.use('/api', agentRouter);
+app.use('/api', confirmRouter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Voice Payments backend running' });
@@ -61,7 +63,13 @@ if (process.env.NODE_ENV !== 'test') {
       // eslint-disable-next-line no-console
       console.error('Stripe back-fill failed', err);
     }
-    if (process.env.INTERRUPTIONS_MVP === 'true') {
+    // Enable WS by default during development; keep it opt-in in production.
+    const enableWS =
+      process.env.NODE_ENV !== 'production'
+        ? process.env.INTERRUPTIONS_MVP !== 'false'
+        : process.env.INTERRUPTIONS_MVP === 'true';
+
+    if (enableWS) {
       const { attachWS } = await import('./conversation/ws.js');
       attachWS(httpServer);
     }
