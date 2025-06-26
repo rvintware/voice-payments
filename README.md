@@ -285,7 +285,7 @@ MIT License + Contributor Covenant 2.1 – see original sections.
 | 4 | 🎤 "Send twenty dollars to Alex." → 🎤 "Yes" | Modal → Checkout link | Alloy confirmation prompt |
 | 5 | Trigger `stripe trigger payment_intent.succeeded` in terminal | New green row pops | (optional WS) "Cha-ching!" |
 
-[🎬 Full walk-through video (2 min)](media/Screen%20Recording%202025-06-13%20at%208.46.03%20PM.mov)
+[🎬 Full walk-through video (2 min)](media/demo_walkthrough.gif)
 
 ### 14-C Test-card cheat-sheet
 
