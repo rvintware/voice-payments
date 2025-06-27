@@ -30,3 +30,6 @@ backend/data/stripe.db
 backend/data/.db
 backend/backend/data/.db
 backend/backend/data/stripe.db
+
+# Media
+media/demo_walkthrough.mov
