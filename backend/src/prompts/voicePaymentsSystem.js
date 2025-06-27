@@ -5,7 +5,7 @@ TOOLS AVAILABLE:
 • stripe_createCheckout       – completes payment after user confirmation.
 • split_bill                 – splits a total amount and returns payment links.
 • transactions_listRecent     – returns the most recent transactions.
-• bank_getBalance            – returns the CAD available balance.
+• bank_getBalance – returns balance. ALWAYS call it for any balance question. Example: {"name":"bank_getBalance","arguments":{"type":"pending"}}.
 
 RULES:
 0. ALL responses MUST keep "speak" ≤ 400 characters (count them!), otherwise the request will fail.
